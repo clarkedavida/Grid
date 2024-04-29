@@ -84,6 +84,14 @@ bool testSmear(GridCartesian& GRID, LatticeGaugeFieldD Umu, LatticeGaugeFieldD U
     return result;
 }
 
+void hotStartSmear(GridCartesian& GRID) {
+    LatticeGaugeFieldD Uproj(&GRID), Uhot(&GRID);
+    GridParallelRNG pRNG(&GRID); pRNG.SeedFixedIntegers(std::vector<int>({111,222,333,444}));
+    SU<Nc>::HotConfiguration(pRNG,Uhot);
+    Smear_HISQ<PeriodicGimplD> hisq_fat(&GRID,1/8.,0.,1/16.,1/64.,1/384.,-1/8.);
+    hisq_fat.projectU3(Uproj,Uhot);
+    Grid_log("norm2(Uproj) = ",norm2(Uproj));
+}
 
 int main (int argc, char** argv) {
 
@@ -93,7 +101,6 @@ int main (int argc, char** argv) {
     Coordinate latt_size(Nd,0); latt_size[0]=Ns; latt_size[1]=Ns; latt_size[2]=Ns; latt_size[3]=Nt;
     std::string conf_in  = "nersc.l8t4b3360";
     int threads          = GridThread::GetThreads();
-
     typedef LatticeGaugeFieldD LGF;
 
     // Initialize the Grid
@@ -135,6 +142,12 @@ int main (int argc, char** argv) {
     } else {
         Grid_error("At least one test failed.");
     }
+
+    // Does a small hot start cause an issue?
+    hotStartSmear(GRID);
+    latt_size[0]=16; latt_size[1]=16; latt_size[2]=16; latt_size[3]=16;
+    GridCartesian SYMM(latt_size,simd_layout,mpi_layout);
+    hotStartSmear(SYMM);
 
     // Test a C-style instantiation 
     double path_coeff[6] = {1, 2, 3, 4, 5, 6};
