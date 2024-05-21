@@ -90,7 +90,7 @@ void hotStartSmear(GridCartesian& GRID) {
     SU<Nc>::HotConfiguration(pRNG,Uhot);
     Smear_HISQ<PeriodicGimplD> hisq_fat(&GRID,1/8.,0.,1/16.,1/64.,1/384.,-1/8.);
     hisq_fat.projectU3(Uproj,Uhot);
-    Grid_log("norm2(Uproj) = ",norm2(Uproj));
+    Grid_log("norm2(Uproj) = ",norm2(Uproj)/(Nc*Nd*GRID.gSites()));
 }
 
 int main (int argc, char** argv) {
