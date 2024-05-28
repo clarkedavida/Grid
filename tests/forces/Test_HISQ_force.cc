@@ -2,7 +2,7 @@
 
 Grid physics library, www.github.com/paboyle/Grid
 
-Source file: ./tests/smearing/Test_fatLinks.cc
+Source file: ./tests/smearing/Test_HISQ_force.cc
 
 Copyright (C) 2024
 
@@ -38,37 +38,24 @@ directory
 using namespace Grid;
 
 
-//bool testSmear(GridCartesian& GRID, LatticeGaugeFieldD Umu, LatticeGaugeFieldD Usmr, LatticeGaugeFieldD Unaik, 
-//               LatticeGaugeFieldD Ucontrol, Real c1, Real cnaik, Real c3, Real c5, Real c7, Real clp) {
-//    Smear_HISQ<PeriodicGimplD> hisq_fat(&GRID,c1,cnaik,c3,c5,c7,clp);
-//    LatticeGaugeFieldD diff(&GRID), Uproj(&GRID);
-//    hisq_fat.smear(Usmr, Unaik, Umu);
-//    bool result;
-//    if (cnaik < 1e-30) { // Testing anything but Naik term
-//        diff = Ucontrol-Usmr;
-//        auto absDiff = norm2(diff)/norm2(Ucontrol);
-//        if (absDiff < 1e-30) {
-//            Grid_pass(" |Umu-Usmr|/|Umu| = ",absDiff);
-//            result = true;
-//        } else {
-//            Grid_error(" |Umu-Usmr|/|Umu| = ",absDiff);
-//            result = false;
-//        }
-//    } else { // Testing Naik specifically
-//        diff = Ucontrol-Unaik;
-//        auto absDiff = norm2(diff)/norm2(Ucontrol);
-//        if (absDiff < 1e-30) {
-//            Grid_pass(" |Umu-Unaik|/|Umu| = ",absDiff);
-//            result = true;
-//        } else {
-//            Grid_error(" |Umu-Unaik|/|Umu| = ",absDiff);
-//            result = false;
-//        }
-//        hisq_fat.projectU3(Uproj,Ucontrol);
-////        NerscIO::writeConfiguration(Unaik,"nersc.l8t4b3360.naik");
-//    }
-//    return result;
-//}
+bool testForce(GridCartesian& GRID, LatticeGaugeField Umu, LatticeGaugeField Uforce, 
+               LatticeGaugeField Ucontrol, Real c1, Real cnaik, Real c3, Real c5, Real c7, Real clp) {
+    Smear_HISQ<PeriodicGimplR> hisq_fat(&GRID,c1,cnaik,c3,c5,c7,clp);
+    LatticeGaugeField diff(&GRID);
+    hisq_fat.ddVprojectU3(Uforce, Umu, Umu, 5e-5);
+    bool result;
+    diff = Ucontrol-Uforce;
+    auto absDiff = norm2(diff)/norm2(Ucontrol);
+    if (absDiff < 1e-30) {
+        Grid_pass(" |Umu-Usmr|/|Umu| = ",absDiff);
+        result = true;
+    } else {
+        Grid_error(" |Umu-Usmr|/|Umu| = ",absDiff);
+        result = false;
+    }
+//    NerscIO::writeConfiguration(Uforce,"nersc.l8t4b3360.ddVU3");
+    return result;
+}
 
 
 int main (int argc, char** argv) {
@@ -79,11 +66,11 @@ int main (int argc, char** argv) {
     Coordinate latt_size(Nd,0); latt_size[0]=Ns; latt_size[1]=Ns; latt_size[2]=Ns; latt_size[3]=Nt;
     std::string conf_in  = "nersc.l8t4b3360";
     int threads          = GridThread::GetThreads();
-    typedef LatticeGaugeFieldD LGF;
+    typedef LatticeGaugeField LGF;
 
     // Initialize the Grid
     Grid_init(&argc,&argv);
-    Coordinate simd_layout = GridDefaultSimd(Nd,vComplexD::Nsimd());
+    Coordinate simd_layout = GridDefaultSimd(Nd,vComplex::Nsimd());
     Coordinate mpi_layout  = GridDefaultMpi();
     Grid_log("mpi     = ",mpi_layout);
     Grid_log("simd    = ",simd_layout);
@@ -91,15 +78,16 @@ int main (int argc, char** argv) {
     Grid_log("threads = ",threads);
     GridCartesian GRID(latt_size,simd_layout,mpi_layout);
 
-    XmlReader Reader("HISQParams.xml",false,"grid");
-
-    LGF Umu(&GRID), dWdV(&GRID);
+    LGF Umu(&GRID), Ucontrol(&GRID);
 
     // Read the configuration into Umu
     FieldMetaData header;
     NerscIO::readConfiguration(Umu, header, conf_in);
 
     bool pass=true;
+
+    NerscIO::readConfiguration(Ucontrol, header, "nersc.l8t4b3360.ddVU3.control");
+    pass *= testForce(GRID,Umu,Umu,Ucontrol,0.,0.,0.,0.,0.,0.);
 
     if(pass){
         Grid_pass("All tests passed.");

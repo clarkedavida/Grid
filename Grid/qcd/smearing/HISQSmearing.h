@@ -342,14 +342,14 @@ public:
         conformable(u_proj,u_mu);
 
         // Follow MILC 10.1103/PhysRevD.82.074501, eqs (B2-B3) and (C1-C8)
-        accelerator_for(ss,umu_v.size(),vLorentzColourMatrixD::Nsimd(),{
+        accelerator_for(ss,umu_v.size(),vLorentzColourMatrix::Nsimd(),{
 #ifdef GRID_SIMT
-            { int blane=acceleratorSIMTlane(vLorentzColourMatrixD::Nsimd());//
+            { int blane=acceleratorSIMTlane(vLorentzColourMatrix::Nsimd());//
 #else
-            for(int blane=0;blane<vLorentzColourMatrixD::Nsimd();blane++) {
+            for(int blane=0;blane<vLorentzColourMatrix::Nsimd();blane++) {
 #endif
                 Real g1, g2, g0;
-                ColourMatrixD V;
+                ColourMatrix V;
                 auto Vmu = extractLane(blane,umu_v[ss]);
                 for (int mu = 0; mu < Nd; mu++) {
                     V()     = Vmu(mu);
@@ -401,14 +401,14 @@ public:
         autoView(uforce_v, u_force, AcceleratorRead);
 
         // Follow MILC 10.1103/PhysRevD.82.074501, eqs (B2-B3) and (C1-C8)
-        accelerator_for(ss,umu_v.size(),vLorentzColourMatrixD::Nsimd(),{
+        accelerator_for(ss,umu_v.size(),vLorentzColourMatrix::Nsimd(),{
 #ifdef GRID_SIMT
-            { int blane=acceleratorSIMTlane(vLorentzColourMatrixD::Nsimd());//
+            { int blane=acceleratorSIMTlane(vLorentzColourMatrix::Nsimd());//
 #else
-            for(int blane=0;blane<vLorentzColourMatrixD::Nsimd();blane++) {
+            for(int blane=0;blane<vLorentzColourMatrix::Nsimd();blane++) {
 #endif
                 Real g1, g2, g0;
-                ColourMatrixD V, force;
+                ColourMatrix V, force;
                 auto Vmu     = extractLane(blane,umu_v[ss]);
                 auto forcemu = extractLane(blane,uforce_v[ss]);
                 for (int mu = 0; mu < Nd; mu++) {
@@ -505,7 +505,7 @@ public:
                     for (int i = 0; i < 3; i++)
                     for (int j = 0; j < 3; j++) {
         
-                        Complex deriv = Zero(); // dWij/dVkl
+                        Complex deriv = 0.; // dWij/dVkl
                 
                         if (k == i) deriv += Qinvsq()()(l,j);
                         if (l == j) deriv += f1*VVdag()()(i,k)+f2*VQVdag()()(i,k);

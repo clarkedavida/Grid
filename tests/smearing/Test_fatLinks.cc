@@ -52,10 +52,10 @@ struct ConfParameters: Serializable {
 };
 
 
-bool testSmear(GridCartesian& GRID, LatticeGaugeFieldD Umu, LatticeGaugeFieldD Usmr, LatticeGaugeFieldD Unaik, 
-               LatticeGaugeFieldD Ucontrol, Real c1, Real cnaik, Real c3, Real c5, Real c7, Real clp) {
-    Smear_HISQ<PeriodicGimplD> hisq_fat(&GRID,c1,cnaik,c3,c5,c7,clp);
-    LatticeGaugeFieldD diff(&GRID), Uproj(&GRID);
+bool testSmear(GridCartesian& GRID, LatticeGaugeField Umu, LatticeGaugeField Usmr, LatticeGaugeField Unaik, 
+               LatticeGaugeField Ucontrol, Real c1, Real cnaik, Real c3, Real c5, Real c7, Real clp) {
+    Smear_HISQ<PeriodicGimplR> hisq_fat(&GRID,c1,cnaik,c3,c5,c7,clp);
+    LatticeGaugeField diff(&GRID), Uproj(&GRID);
     hisq_fat.smear(Usmr, Unaik, Umu);
     bool result;
     if (cnaik < 1e-30) { // Testing anything but Naik term
@@ -85,7 +85,7 @@ bool testSmear(GridCartesian& GRID, LatticeGaugeFieldD Umu, LatticeGaugeFieldD U
 }
 
 void hotStartSmear(GridCartesian& GRID) {
-    LatticeGaugeFieldD Uproj(&GRID), Uhot(&GRID);
+    LatticeGaugeField Uproj(&GRID), Uhot(&GRID);
     GridParallelRNG pRNG(&GRID); pRNG.SeedFixedIntegers(std::vector<int>({111,222,333,444}));
     SU<Nc>::HotConfiguration(pRNG,Uhot);
     Smear_HISQ<PeriodicGimplD> hisq_fat(&GRID,1/8.,0.,1/16.,1/64.,1/384.,-1/8.);
@@ -101,11 +101,11 @@ int main (int argc, char** argv) {
     Coordinate latt_size(Nd,0); latt_size[0]=Ns; latt_size[1]=Ns; latt_size[2]=Ns; latt_size[3]=Nt;
     std::string conf_in  = "nersc.l8t4b3360";
     int threads          = GridThread::GetThreads();
-    typedef LatticeGaugeFieldD LGF;
+    typedef LatticeGaugeField LGF;
 
     // Initialize the Grid
     Grid_init(&argc,&argv);
-    Coordinate simd_layout = GridDefaultSimd(Nd,vComplexD::Nsimd());
+    Coordinate simd_layout = GridDefaultSimd(Nd,vComplex::Nsimd());
     Coordinate mpi_layout  = GridDefaultMpi();
     Grid_log("mpi     = ",mpi_layout);
     Grid_log("simd    = ",simd_layout);
@@ -151,7 +151,7 @@ int main (int argc, char** argv) {
 
     // Test a C-style instantiation 
     double path_coeff[6] = {1, 2, 3, 4, 5, 6};
-    Smear_HISQ<PeriodicGimplD> hisq_fat_Cstyle(&GRID,path_coeff);
+    Smear_HISQ<PeriodicGimplR> hisq_fat_Cstyle(&GRID,path_coeff);
 
     if (param.benchmark) {
 
