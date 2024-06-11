@@ -35,7 +35,6 @@ directory
 #include <Grid/Grid.h>
 #include <Grid/lattice/PaddedCell.h>
 #include <Grid/stencil/GeneralLocalStencil.h>
-//#include <Grid/cartesian/Cartesian_base.h>
 
 NAMESPACE_BEGIN(Grid);
 
@@ -89,6 +88,7 @@ public:
     typedef typename Gimpl::GaugeField     GF;
     typedef typename Gimpl::GaugeLinkField LF;
     typedef typename Gimpl::ComplexField   CF;
+//  typedef typename Gimpl::(real part of a complex)
 
     Smear_HISQ(GridCartesian* grid, Real c1, Real cnaik, Real c3, Real c5, Real c7, Real clp) 
         : _grid(grid), 
@@ -168,7 +168,7 @@ public:
             auto gStencil_v = gStencil.View(AcceleratorRead); 
 
             accelerator_for(site,Nsites,Simd::Nsimd(),{ // ----------- 3-link constructs
-                stencilElement SE0, SE1, SE2, SE3, SE4, SE5;
+                stencilElement SE0, SE1, SE2, SE3, SE4;
                 U3matrix U0, U1, U2, U3, U4, U5, W;
                 for(int nu=0;nu<Nd;nu++) {
                     if(nu==mu) continue;
@@ -181,7 +181,6 @@ public:
                     SE2 = gStencil_v.GetEntry(s+2,site); int x           = SE2->_offset;
                     SE3 = gStencil_v.GetEntry(s+3,site); int x_p_mu_m_nu = SE3->_offset;
                     SE4 = gStencil_v.GetEntry(s+4,site); int x_m_nu      = SE4->_offset;
-                    SE5 = gStencil_v.GetEntry(s+5,site); int x_m_mu      = SE5->_offset;
 
                     // When you're deciding whether to take an adjoint, the question is: how is the
                     // stored link oriented compared to the one you want? If I imagine myself travelling
@@ -208,7 +207,7 @@ public:
             })
 
             accelerator_for(site,Nsites,Simd::Nsimd(),{ // ----------- 5-link 
-                stencilElement SE0, SE1, SE2, SE3, SE4, SE5;
+                stencilElement SE0, SE1, SE2, SE3, SE4;
                 U3matrix U0, U1, U2, U3, U4, U5, W;
                 int sigmaIndex = 0;
                 for(int nu=0;nu<Nd;nu++) {
@@ -245,7 +244,7 @@ public:
             })
 
             accelerator_for(site,Nsites,Simd::Nsimd(),{ // ----------- 7-link
-                stencilElement SE0, SE1, SE2, SE3, SE4, SE5;
+                stencilElement SE0, SE1, SE2, SE3, SE4;
                 U3matrix U0, U1, U2, U3, U4, U5, W;
                 int sigmaIndex = 0;
                 for(int nu=0;nu<Nd;nu++) {
