@@ -41,15 +41,16 @@ NAMESPACE_BEGIN(Grid);
 
 
 /*!  @brief structure holding the link treatment */
+template<class floatT>
 struct SmearingParameters{
     SmearingParameters(){}
-    Real c_1;               // 1 link
-    Real c_naik;            // Naik term
-    Real c_3;               // 3 link
-    Real c_5;               // 5 link
-    Real c_7;               // 7 link
-    Real c_lp;              // 5 link Lepage
-    SmearingParameters(Real c1, Real cnaik, Real c3, Real c5, Real c7, Real clp) 
+    floatT c_1;               // 1 link
+    floatT c_naik;            // Naik term
+    floatT c_3;               // 3 link
+    floatT c_5;               // 5 link
+    floatT c_7;               // 7 link
+    floatT c_lp;              // 5 link Lepage
+    SmearingParameters(floatT c1, floatT cnaik, floatT c3, floatT c5, floatT c7, floatT clp) 
         : c_1(c1),
           c_naik(cnaik),
           c_3(c3),
@@ -74,8 +75,51 @@ class Smear_HISQ : public Gimpl {
 public:
 
     GridCartesian* const _grid;
-    Real const Scut = 1e-16; // Cutoff for U(3) projection eigenvalues
-    SmearingParameters linkTreatment;
+
+    // Sort out the Gimpl. This handles BCs and part of the precision. 
+    INHERIT_GIMPL_TYPES(Gimpl);
+    typedef typename Gimpl::GaugeField     GF;
+    typedef typename Gimpl::GaugeLinkField LF;
+    typedef typename Gimpl::ComplexField   CF;
+    typedef typename Gimpl::Scalar ComplexScalar;
+    typedef decltype(real(ComplexScalar())) RealScalar;
+    typedef iColourMatrix<ComplexScalar> ComplexColourMatrix;
+
+    RealScalar Scut=-1; // Cutoff for U(3) projection eigenvalues, set at initialization
+    int Nsimd=0;
+    SmearingParameters<RealScalar> linkTreatment;
+
+    void initialize() {
+        if (sizeof(RealScalar)==4) {
+            Scut=1e-6;
+        } else if (sizeof(RealScalar)==8) { 
+            Scut=1e-8;
+        } else {
+            Grid_error("HISQ smearing only implemented for single and double");
+        }
+        assert(Nc == 3 && "HISQ smearing currently implemented only for Nc==3");
+        assert(Nd == 4 && "HISQ smearing only defined for Nd==4");
+    }
+
+    Smear_HISQ(GridCartesian* grid, RealScalar c1, RealScalar cnaik, RealScalar c3, RealScalar c5, RealScalar c7, RealScalar clp) 
+        : _grid(grid), 
+          linkTreatment(c1,cnaik,c3,c5,c7,clp) {
+        initialize();
+    }
+
+    // Allow to pass a pointer to a C-style array for MILC convenience
+    Smear_HISQ(GridCartesian* grid, double* coeff) 
+        : _grid(grid), 
+          linkTreatment(coeff[0],coeff[1],coeff[2],coeff[3],coeff[4],coeff[5]) {
+        initialize();
+    }
+    Smear_HISQ(GridCartesian* grid, float* coeff) 
+        : _grid(grid), 
+          linkTreatment(coeff[0],coeff[1],coeff[2],coeff[3],coeff[4],coeff[5]) {
+        initialize();
+    }
+
+    ~Smear_HISQ() {}
 
     // figure out the stencil index from mu and nu
     accelerator_inline int stencilIndex(int mu, int nu) const {
@@ -83,29 +127,6 @@ public:
         int Nshifts = 6;
         return Nshifts*nu + Nd*Nshifts*mu;
     }
-
-    INHERIT_GIMPL_TYPES(Gimpl);
-    typedef typename Gimpl::GaugeField     GF;
-    typedef typename Gimpl::GaugeLinkField LF;
-    typedef typename Gimpl::ComplexField   CF;
-//  typedef typename Gimpl::(real part of a complex)
-
-    Smear_HISQ(GridCartesian* grid, Real c1, Real cnaik, Real c3, Real c5, Real c7, Real clp) 
-        : _grid(grid), 
-          linkTreatment(c1,cnaik,c3,c5,c7,clp) {
-        assert(Nc == 3 && "HISQ smearing currently implemented only for Nc==3");
-        assert(Nd == 4 && "HISQ smearing only defined for Nd==4");
-    }
-
-    // Allow to pass a pointer to a C-style, double array for MILC convenience
-    Smear_HISQ(GridCartesian* grid, double* coeff) 
-        : _grid(grid), 
-          linkTreatment(coeff[0],coeff[1],coeff[2],coeff[3],coeff[4],coeff[5]) {
-        assert(Nc == 3 && "HISQ smearing currently implemented only for Nc==3");
-        assert(Nd == 4 && "HISQ smearing only defined for Nd==4");
-    }
-
-    ~Smear_HISQ() {}
 
     // Intent: OUT--u_smr (smeared links), 
     //              u_naik (Naik links),
@@ -341,40 +362,40 @@ public:
         conformable(u_proj,u_mu);
 
         // Follow MILC 10.1103/PhysRevD.82.074501, eqs (B2-B3) and (C1-C8)
-        accelerator_for(ss,umu_v.size(),vLorentzColourMatrix::Nsimd(),{
+        accelerator_for(ss,umu_v.size(),Simd::Nsimd(),{
 #ifdef GRID_SIMT
-            { int blane=acceleratorSIMTlane(vLorentzColourMatrix::Nsimd());//
+            { int blane=acceleratorSIMTlane(Simd::Nsimd());//
 #else
-            for(int blane=0;blane<vLorentzColourMatrix::Nsimd();blane++) {
+            for(int blane=0;blane<Simd::Nsimd();blane++) {
 #endif
-                Real g1, g2, g0;
-                ColourMatrix V;
+                RealScalar g1, g2, g0;
+                ComplexColourMatrix V;
                 auto Vmu = extractLane(blane,umu_v[ss]);
                 for (int mu = 0; mu < Nd; mu++) {
                     V()     = Vmu(mu);
                     auto Q  = adj(V)*V;
-                    auto c0 =        real(trace(Q));
-                    auto c1 = (1/2.)*real(trace(Q*Q));
-                    auto c2 = (1/3.)*real(trace(Q*Q*Q));
-                    auto S  = (1/3.)*c1-(1/18.)*c0*c0;
-                    if (norm2(S)<1e-16) {
+                    RealScalar c0 =        real(trace(Q))()()();
+                    RealScalar c1 = (1/2.)*real(trace(Q*Q))()()();
+                    RealScalar c2 = (1/3.)*real(trace(Q*Q*Q))()()();
+                    RealScalar S  = (1/3.)*c1-(1/18.)*c0*c0;
+                    if (abs(S)<Scut) {
                         g0 = (1/3.)*c0; 
                         g1 = g0; 
                         g2 = g1;
                     } else {
-                        auto R     = (1/2.)*c2-(1/3. )*c0*c1+(1/27.)*c0*c0*c0;
-                        auto theta = std::acos(R*pow(S,-1.5));
+                        RealScalar R     = (1/2.)*c2-(1/3. )*c0*c1+(1/27.)*c0*c0*c0;
+                        RealScalar theta = acos(R*pow(S,-1.5));
                         g0 = (1/3.)*c0+2.*sqrt(S)*cos((1/3.)*theta-2*M_PI/3.);
                         g1 = (1/3.)*c0+2.*sqrt(S)*cos((1/3.)*theta          );
                         g2 = (1/3.)*c0+2.*sqrt(S)*cos((1/3.)*theta+2*M_PI/3.);
                     }
-                    auto u   = sqrt(g0) + sqrt(g1) + sqrt(g2);
-                    auto v   = sqrt(g0*g1) + sqrt(g0*g2) + sqrt(g1*g2);
-                    auto w   = sqrt(g0*g1*g2);
-                    auto den = w*(u*v-w);
-                    auto f0  = (-w*(u*u+v)+u*v*v)/den;
-                    auto f1  = (-w-u*u*u+2.*u*v)/den;
-                    auto f2  = u/den;
+                    RealScalar u   = sqrt(g0) + sqrt(g1) + sqrt(g2);
+                    RealScalar v   = sqrt(g0*g1) + sqrt(g0*g2) + sqrt(g1*g2);
+                    RealScalar w   = sqrt(g0*g1*g2);
+                    RealScalar den = w*(u*v-w);
+                    RealScalar f0  = (-w*(u*u+v)+u*v*v)/den;
+                    RealScalar f1  = (-w-u*u*u+2.*u*v)/den;
+                    RealScalar f2  = u/den;
 
                     auto res = V*(f0 + f1*Q + f2*Q*Q);
 
@@ -390,7 +411,7 @@ public:
     //              u_force (slot derivative into this force), 
     //              delta (force cutoff)
     // Follow MILC 10.1103/PhysRevD.82.074501
-    void ddVprojectU3(GF& u_deriv, GF& u_mu, GF& u_force, Real const delta=5e-5) {
+    void ddVprojectU3(GF& u_deriv, GF& u_mu, GF& u_force, RealScalar const delta=5e-5) {
 
         conformable(u_force,u_mu);
         conformable(u_deriv,u_mu);
@@ -400,30 +421,30 @@ public:
         autoView(uforce_v, u_force, AcceleratorRead);
 
         // Follow MILC 10.1103/PhysRevD.82.074501, eqs (B2-B3) and (C1-C8)
-        accelerator_for(ss,umu_v.size(),vLorentzColourMatrix::Nsimd(),{
+        accelerator_for(ss,umu_v.size(),Simd::Nsimd(),{
 #ifdef GRID_SIMT
-            { int blane=acceleratorSIMTlane(vLorentzColourMatrix::Nsimd());//
+            { int blane=acceleratorSIMTlane(Simd::Nsimd());//
 #else
-            for(int blane=0;blane<vLorentzColourMatrix::Nsimd();blane++) {
+            for(int blane=0;blane<Simd::Nsimd();blane++) {
 #endif
-                Real g1, g2, g0;
-                ColourMatrix V, force;
+                RealScalar g1, g2, g0;
+                ComplexColourMatrix V, force;
                 auto Vmu     = extractLane(blane,umu_v[ss]);
                 auto forcemu = extractLane(blane,uforce_v[ss]);
                 for (int mu = 0; mu < Nd; mu++) {
                     V()     = Vmu(mu);
                     auto Q  = adj(V)*V;
-                    auto c0 =        real(trace(Q));
-                    auto c1 = (1/2.)*real(trace(Q*Q));
-                    auto c2 = (1/3.)*real(trace(Q*Q*Q));
-                    auto S  = (1/3.)*c1-(1/18.)*c0*c0;
-                    if (norm2(S)<1e-16) {
+                    RealScalar c0 =        real(trace(Q))()()();
+                    RealScalar c1 = (1/2.)*real(trace(Q*Q))()()();
+                    RealScalar c2 = (1/3.)*real(trace(Q*Q*Q))()()();
+                    RealScalar S  = (1/3.)*c1-(1/18.)*c0*c0;
+                    if (abs(S)<Scut) {
                         g0 = (1/3.)*c0; 
                         g1 = g0; 
                         g2 = g1;
                     } else {
-                        auto R     = (1/2.)*c2-(1/3. )*c0*c1+(1/27.)*c0*c0*c0;
-                        auto theta = std::acos(R*pow(S,-1.5));
+                        RealScalar R     = (1/2.)*c2-(1/3. )*c0*c1+(1/27.)*c0*c0*c0;
+                        RealScalar theta = acos(R*pow(S,-1.5));
                         g0 = (1/3.)*c0+2.*sqrt(S)*cos((1/3.)*theta-2*M_PI/3.);
                         g1 = (1/3.)*c0+2.*sqrt(S)*cos((1/3.)*theta          );
                         g2 = (1/3.)*c0+2.*sqrt(S)*cos((1/3.)*theta+2*M_PI/3.);
@@ -438,35 +459,35 @@ public:
                     }
 //                if (fabs(Q.determinant()/(g0*g1*g2)-1.0) > 1e-5) { SVD }
 
-                    auto u   = sqrt(g0) + sqrt(g1) + sqrt(g2);
-                    auto v   = sqrt(g0*g1) + sqrt(g0*g2) + sqrt(g1*g2);
-                    auto w   = sqrt(g0*g1*g2);
-                    auto den = w*(u*v-w);
-                    auto f0  = (-w*(u*u+v)+u*v*v)/den;
-                    auto f1  = (-w-u*u*u+2.*u*v)/den;
-                    auto f2  = u/den;
+                    RealScalar u   = sqrt(g0) + sqrt(g1) + sqrt(g2);
+                    RealScalar v   = sqrt(g0*g1) + sqrt(g0*g2) + sqrt(g1*g2);
+                    RealScalar w   = sqrt(g0*g1*g2);
+                    RealScalar den = w*(u*v-w);
+                    RealScalar f0  = (-w*(u*u+v)+u*v*v)/den;
+                    RealScalar f1  = (-w-u*u*u+2.*u*v)/den;
+                    RealScalar f2  = u/den;
 
                     auto Qinvsq = f0 + f1*Q + f2*Q*Q;
 
                     force() = forcemu(mu);
                     auto forcedag = adj(force);
 
-                    auto u2 = u  * u;
-                    auto u3 = u2 * u;
-                    auto u4 = u3 * u;
-                    auto u5 = u4 * u;
-                    auto u6 = u5 * u;
-                    auto u7 = u6 * u;
-                    auto u8 = u7 * u;
-                    auto v2 = v  * v;
-                    auto v3 = v2 * v;
-                    auto v4 = v3 * v;
-                    auto v5 = v4 * v;
-                    auto v6 = v5 * v;
-                    auto w2 = w  * w;
-                    auto w3 = w2 * w;
-                    auto w4 = w3 * w;
-                    auto w5 = w4 * w;
+                    RealScalar u2 = u  * u;
+                    RealScalar u3 = u2 * u;
+                    RealScalar u4 = u3 * u;
+                    RealScalar u5 = u4 * u;
+                    RealScalar u6 = u5 * u;
+                    RealScalar u7 = u6 * u;
+                    RealScalar u8 = u7 * u;
+                    RealScalar v2 = v  * v;
+                    RealScalar v3 = v2 * v;
+                    RealScalar v4 = v3 * v;
+                    RealScalar v5 = v4 * v;
+                    RealScalar v6 = v5 * v;
+                    RealScalar w2 = w  * w;
+                    RealScalar w3 = w2 * w;
+                    RealScalar w4 = w3 * w;
+                    RealScalar w5 = w4 * w;
         
                     // eq (C10)
                     auto d = 2*w3*(u*v-w)*(u*v-w)*(u*v-w);
@@ -498,13 +519,13 @@ public:
                     auto SVdag  = ( C02 + C12*Q + C22*Q*Q )*Vdag;
         
                     // eqs (C20) and (C21)
-                    ColourMatrix res = Zero();
+                    ComplexColourMatrix res = Zero();
                     for (int k = 0; k < 3; k++)
                     for (int l = 0; l < 3; l++)
                     for (int i = 0; i < 3; i++)
                     for (int j = 0; j < 3; j++) {
         
-                        Complex deriv = 0.; // dWij/dVkl
+                        ComplexScalar deriv = 0.; // dWij/dVkl
                 
                         if (k == i) deriv += Qinvsq()()(l,j);
                         if (l == j) deriv += f1*VVdag()()(i,k)+f2*VQVdag()()(i,k);
