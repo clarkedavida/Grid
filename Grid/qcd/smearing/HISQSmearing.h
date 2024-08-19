@@ -86,12 +86,13 @@ public:
     typedef iColourMatrix<ComplexScalar> ComplexColourMatrix;
 
     RealScalar Scut=-1; // Cutoff for U(3) projection eigenvalues, set at initialization
-    int Nsimd=0;
+    int HaloDepth=1; 
+
     SmearingParameters<RealScalar> linkTreatment;
 
     void initialize() {
         if (sizeof(RealScalar)==4) {
-            Scut=1e-6;
+            Scut=1e-5; // Maybe should be higher? e.g. 1e-4
         } else if (sizeof(RealScalar)==8) { 
             Scut=1e-8;
         } else {
@@ -137,8 +138,7 @@ public:
         auto grid = this->_grid;
 
         // Create a padded cell of extra padding depth=1 and fill the padding.
-        int depth = 1;
-        PaddedCell Ghost(depth,grid);
+        PaddedCell Ghost(HaloDepth,grid);
         GF Ughost = Ghost.Exchange(u_thin);
 
         // This is where auxiliary N-link fields and the final smear will be stored. 
@@ -162,6 +162,7 @@ public:
 
         // A GeneralLocalStencil has two indices: a site and stencil index 
         GeneralLocalStencil gStencil(Ughost.Grid(),shifts);
+        typedef decltype(gStencil.GetEntry(0,0)) stencilElement;
 
         // This is where contributions from the smearing get added together
         Ughost_fat=Zero();
@@ -181,8 +182,7 @@ public:
             autoView(U_5linkA_v, Ughost_5linkA, AcceleratorWrite);
             autoView(U_5linkB_v, Ughost_5linkB, AcceleratorWrite);
 
-            // We infer some types that will be needed in the calculation.
-            typedef decltype(gStencil.GetEntry(0,0)) stencilElement;
+            // We infer a type that will be needed in the calculation.
             typedef decltype(getLink(U_v[0](0),gStencil.GetEntry(0,0))) U3matrix;
 
             int Nsites = U_v.size();
@@ -548,6 +548,83 @@ public:
             } 
         });
     };
+
+
+    void ddV_3link(GF& u_deriv, GF& u_mu, GF& u_force) {
+
+        SmearingParameters lt = this->linkTreatment;
+        auto grid = this->_grid;
+
+        PaddedCell Ghost(HaloDepth,grid);
+        GF Ughost = Ghost.Exchange(u_mu);
+        GF Fghost = Ghost.Exchange(u_force);
+
+        GF Ughost_deriv(Ughost.Grid());
+
+        Ughost_deriv = Zero();
+
+        std::vector<Coordinate> shifts;
+        for(int mu=0;mu<Nd;mu++)
+        for(int nu=0;nu<Nd;nu++) {
+            appendShift<Nd>(shifts,mu);
+            appendShift<Nd>(shifts,nu);
+            appendShift<Nd>(shifts,shiftSignal::NO_SHIFT);
+            appendShift<Nd>(shifts,mu,Back(nu));
+            appendShift<Nd>(shifts,Back(nu));
+            appendShift<Nd>(shifts,Back(mu));
+        }
+
+        GeneralLocalStencil gStencil(Ughost.Grid(),shifts);
+        typedef decltype(gStencil.GetEntry(0,0)) stencilElement;
+
+        for(int mu=0;mu<Nd;mu++) {
+
+            autoView(U_v      , Ughost      , AcceleratorRead);
+            autoView(F_v      , Fghost      , AcceleratorRead);
+            autoView(U_deriv_v, Ughost_deriv, AcceleratorWrite);
+
+            typedef decltype(getLink(U_v[0](0),gStencil.GetEntry(0,0))) U3matrix;
+
+            int Nsites = U_v.size();
+            auto gStencil_v = gStencil.View(AcceleratorRead);
+
+            accelerator_for(site,Nsites,Simd::Nsimd(),{ 
+                stencilElement SE0, SE1, SE2, SE3, SE4;
+                U3matrix U0, U1, U2, U3, U4, U5, F0, F1, F2, F3, F4, F5, W;
+                for(int nu=0;nu<Nd;nu++) {
+                    if(nu==mu) continue;
+                    int s = stencilIndex(mu,nu);
+
+                    SE0 = gStencil_v.GetEntry(s+0,site); int x_p_mu      = SE0->_offset;
+                    SE1 = gStencil_v.GetEntry(s+1,site); int x_p_nu      = SE1->_offset;
+                    SE2 = gStencil_v.GetEntry(s+2,site); int x           = SE2->_offset;
+                    SE3 = gStencil_v.GetEntry(s+3,site); int x_p_mu_m_nu = SE3->_offset;
+                    SE4 = gStencil_v.GetEntry(s+4,site); int x_m_nu      = SE4->_offset;
+
+                    U0 = getLink(U_v[x_p_mu     ](nu),SE0);
+                    U1 = getLink(U_v[x_p_nu     ](mu),SE1);
+                    U2 = getLink(U_v[x          ](nu),SE2);
+                    U3 = getLink(U_v[x_p_mu_m_nu](nu),SE3);
+                    U4 = getLink(U_v[x_m_nu     ](mu),SE4);
+                    U5 = getLink(U_v[x_m_nu     ](nu),SE4);
+
+                    F0 = getLink(F_v[x_p_mu     ](nu),SE0);
+                    F1 = getLink(F_v[x_p_nu     ](mu),SE1);
+                    F2 = getLink(F_v[x          ](nu),SE2);
+                    F3 = getLink(F_v[x_p_mu_m_nu](nu),SE3);
+                    F4 = getLink(F_v[x_m_nu     ](mu),SE4);
+                    F5 = getLink(F_v[x_m_nu     ](nu),SE4);
+
+                    W  =   adj(F2)*U1*adj(U0) +     U2 *adj(F1)*adj(U0) +     U2 *U1*    F0 
+                         +     F5 *U4*    U3  + adj(U5)*adj(F4)*    U3  + adj(U5)*U4*adj(F3);                    
+
+                    setLink(U_deriv_v[x](mu), U_deriv_v(x)(mu) + lt.c_3*W);
+                }              
+            })
+        } // end mu loop
+
+        u_deriv = Ghost.Extract(Ughost_deriv);
+    }
 
 //    void derivative(const GaugeField& Gauge) const {
 //    };

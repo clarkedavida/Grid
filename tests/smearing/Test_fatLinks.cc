@@ -39,7 +39,7 @@ using namespace Grid;
 
 
 //#define USE_DOUBLE true 
-#define USE_DOUBLE false 
+#define USE_DOUBLE true 
 
 #if USE_DOUBLE 
     #define PREC double
