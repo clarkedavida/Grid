@@ -125,7 +125,7 @@ public:
     // figure out the stencil index from mu and nu
     accelerator_inline int stencilIndex(int mu, int nu) const {
         // Nshifts depends on how you built the stencil
-        int Nshifts = 6;
+        int Nshifts = 5;
         return Nshifts*nu + Nd*Nshifts*mu;
     }
 
@@ -157,7 +157,6 @@ public:
             appendShift<Nd>(shifts,shiftSignal::NO_SHIFT);
             appendShift<Nd>(shifts,mu,Back(nu));
             appendShift<Nd>(shifts,Back(nu));
-            appendShift<Nd>(shifts,Back(mu));
         }
 
         // A GeneralLocalStencil has two indices: a site and stencil index 
