@@ -69,6 +69,15 @@ vobj getLink(const vobj & __restrict__ vec,GeneralStencilEntry* SE) {
 #define setLink coalescedWrite 
 
 
+// figure out the stencil index from mu and nu
+accelerator_inline int stencilIndex(int mu, int nu) {
+    // Nshifts depends on how you built the stencil
+    int Nshifts = 5;
+    return Nshifts*nu + Nd*Nshifts*mu;
+}
+
+
+
 /*!  @brief create fat links from link variables */
 template<class Gimpl> 
 class Smear_HISQ : public Gimpl {
@@ -121,13 +130,6 @@ public:
     }
 
     ~Smear_HISQ() {}
-
-    // figure out the stencil index from mu and nu
-    accelerator_inline int stencilIndex(int mu, int nu) const {
-        // Nshifts depends on how you built the stencil
-        int Nshifts = 5;
-        return Nshifts*nu + Nd*Nshifts*mu;
-    }
 
     // Intent: OUT--u_smr (smeared links), 
     //              u_naik (Naik links),
@@ -404,6 +406,63 @@ public:
         });
     };
 
+};
+
+
+
+/*!  @brief compute force from link variables */
+template<class Gimpl> 
+class Force_HISQ : public Gimpl {
+public:
+
+    GridCartesian* const _grid;
+
+    // Sort out the Gimpl. This handles BCs and part of the precision. 
+    INHERIT_GIMPL_TYPES(Gimpl);
+    typedef typename Gimpl::GaugeField     GF;
+    typedef typename Gimpl::GaugeLinkField LF;
+    typedef typename Gimpl::ComplexField   CF;
+    typedef typename Gimpl::Scalar ComplexScalar;
+    typedef decltype(real(ComplexScalar())) RealScalar;
+    typedef iColourMatrix<ComplexScalar> ComplexColourMatrix;
+
+    RealScalar Scut=-1; // Cutoff for U(3) projection eigenvalues, set at initialization
+    int HaloDepth=1; 
+
+    SmearingParameters<RealScalar> linkTreatment;
+
+    void initialize() {
+        if (sizeof(RealScalar)==4) {
+            Scut=1e-5; // Maybe should be higher? e.g. 1e-4
+        } else if (sizeof(RealScalar)==8) { 
+            Scut=1e-8;
+        } else {
+            Grid_error("HISQ force only implemented for single and double");
+        }
+        assert(Nc == 3 && "HISQ force currently implemented only for Nc==3");
+        assert(Nd == 4 && "HISQ force only defined for Nd==4");
+    }
+
+    Force_HISQ(GridCartesian* grid, RealScalar c1, RealScalar cnaik, RealScalar c3, RealScalar c5, RealScalar c7, RealScalar clp) 
+        : _grid(grid), 
+          linkTreatment(c1,cnaik,c3,c5,c7,clp) {
+        initialize();
+    }
+
+    // Allow to pass a pointer to a C-style array for MILC convenience
+    Force_HISQ(GridCartesian* grid, double* coeff) 
+        : _grid(grid), 
+          linkTreatment(coeff[0],coeff[1],coeff[2],coeff[3],coeff[4],coeff[5]) {
+        initialize();
+    }
+    Force_HISQ(GridCartesian* grid, float* coeff) 
+        : _grid(grid), 
+          linkTreatment(coeff[0],coeff[1],coeff[2],coeff[3],coeff[4],coeff[5]) {
+        initialize();
+    }
+
+    ~Force_HISQ() {}
+
 
     // Intent: OUT--u_deriv (dW/dV slotted into force)
     //          IN--u_mu (fat links), 
@@ -643,7 +702,6 @@ public:
             appendShift<Nd>(shifts, shiftSignal::NO_SHIFT);
             appendShift<Nd>(shifts, mu);
             appendShift<Nd>(shifts, mu, mu);
-
             appendShift<Nd>(shifts, Back(mu));
             appendShift<Nd>(shifts, Back(mu), Back(mu));
             appendShift<Nd>(shifts, Back(mu), Back(mu), Back(mu));
@@ -662,9 +720,9 @@ public:
         auto gStencil_v = gStencil.View(AcceleratorRead);
 
         accelerator_for(site,Nsites,Simd::Nsimd(),{ 
-            stencilElement SE0, SE1, SE2, SE3, SE4;
+            stencilElement SE0, SE1, SE2, SE3, SE4, SE5;
             U3matrix U0, U1, U2, U3, U4, U5, F0, F1, F2, F3, F4, F5, V;
-            int s = 0
+            int s = 0;
             for(int mu=0;mu<Nd;mu++) {
 
                 SE0 = gStencil_v.GetEntry(s+0,site); int x       = SE0->_offset;
@@ -701,8 +759,6 @@ public:
         u_deriv = Ghost.Extract(Ughost_deriv);
     }
 
-//    void derivative(const GaugeField& Gauge) const {
-//    };
 };
 
 
