@@ -27,7 +27,7 @@ directory
 *************************************************************************************/
 /*
     @file HISQSmearing.h
-    @brief Declares classes related to HISQ smearing 
+    @brief Declares classes related to the HISQ action 
 */
 
 
@@ -35,21 +35,18 @@ directory
 #include <Grid/Grid.h>
 #include <Grid/lattice/PaddedCell.h>
 #include <Grid/stencil/GeneralLocalStencil.h>
-
 NAMESPACE_BEGIN(Grid);
 
 
-
-/*!  @brief structure holding the link treatment */
+/*!  @brief structure holding the link treatment for a given smear */
 template<class floatT>
 struct SmearingParameters{
-    SmearingParameters(){}
     floatT c_1;               // 1 link
     floatT c_naik;            // Naik term
     floatT c_3;               // 3 link
     floatT c_5;               // 5 link
     floatT c_7;               // 7 link
-    floatT c_lp;              // 5 link Lepage
+    floatT c_lp;              // Lepage
     SmearingParameters(floatT c1, floatT cnaik, floatT c3, floatT c5, floatT c7, floatT clp) 
         : c_1(c1),
           c_naik(cnaik),
@@ -57,6 +54,69 @@ struct SmearingParameters{
           c_5(c5),
           c_7(c7),
           c_lp(clp){}
+};
+
+
+// There are 6 quarks in nature, and 3 never need a Naik epsilon
+int const GRID_MAX_NAIK = 3;
+
+
+/*!  @brief structure holding all input parameters related to the HISQ action */
+template<class floatT>
+struct HISQParameters{
+    // Structure from QOP/QDP 
+    int n_naiks;
+    std::array<floatT,GRID_MAX_NAIK> eps_naiks;
+    floatT fat7_c1;
+    floatT fat7_c3;
+    floatT fat7_c5;
+    floatT fat7_c7;
+    floatT fat7_clp;
+    floatT asqtad_c1;
+    floatT asqtad_c3;
+    floatT asqtad_c5;
+    floatT asqtad_c7;
+    floatT asqtad_clp;
+    floatT asqtad_cnaik;
+    floatT diff_c1;
+    floatT diff_cnaik;
+    HISQParameters(int n_naiks_in, std::array<floatT,GRID_MAX_NAIK> eps_naiks_in, 
+                   floatT fat7_one_link  , floatT fat7_three_staple  , floatT fat7_five_staple  , floatT fat7_seven_staple  , floatT fat7_lepage, 
+                   floatT asqtad_one_link, floatT asqtad_three_staple, floatT asqtad_five_staple, floatT asqtad_seven_staple, floatT asqtad_lepage,
+                   floatT asqtad_naik    , floatT difference_one_link, floatT difference_naik) 
+        : n_naiks(n_naiks_in),
+          eps_naiks(eps_naiks_in), 
+          fat7_c1(fat7_one_link),
+          fat7_c3(fat7_three_staple),
+          fat7_c5(fat7_five_staple),
+          fat7_c7(fat7_seven_staple),
+          fat7_clp(fat7_lepage),
+          asqtad_c1(asqtad_one_link),
+          asqtad_c3(asqtad_three_staple),
+          asqtad_c5(asqtad_five_staple),
+          asqtad_c7(asqtad_seven_staple),
+          asqtad_clp(asqtad_lepage),
+          asqtad_cnaik(asqtad_naik),
+          diff_c1(difference_one_link),
+          diff_cnaik(difference_naik) {}
+};
+
+
+/*!  @brief somtimes in the U(3) projection we use SVD cuts; here we collect related parameters */
+template<class floatT>
+struct HISQReunitSVDParameters{
+    // Structure from QOP/QDP 
+    bool   allow_svd;
+    bool   svd_only;
+    floatT svd_rel_error;
+    floatT svd_abs_error;
+    floatT force_filter;
+    HISQReunitSVDParameters(bool allow, bool only, floatT rel, floatT abs, floatT filter)
+        : allow_svd(allow),
+          svd_only(only),
+          svd_rel_error(rel),
+          svd_abs_error(abs),
+          force_filter(filter) {}
 };
 
 
@@ -94,16 +154,16 @@ public:
     typedef decltype(real(ComplexScalar())) RealScalar;
     typedef iColourMatrix<ComplexScalar> ComplexColourMatrix;
 
-    RealScalar Scut=-1; // Cutoff for U(3) projection eigenvalues, set at initialization
-    int HaloDepth=1; 
+    RealScalar _Scut; // Cutoff for U(3) projection eigenvalues, set at initialization
+    int _HaloDepth=1; 
 
-    SmearingParameters<RealScalar> linkTreatment;
+    SmearingParameters<RealScalar> _linkTreatment;
 
     void initialize() {
         if (sizeof(RealScalar)==4) {
-            Scut=1e-5; // Maybe should be higher? e.g. 1e-4
+            _Scut=1e-5; // Maybe should be higher? e.g. 1e-4
         } else if (sizeof(RealScalar)==8) { 
-            Scut=1e-8;
+            _Scut=1e-8;
         } else {
             Grid_error("HISQ smearing only implemented for single and double");
         }
@@ -113,19 +173,19 @@ public:
 
     Smear_HISQ(GridCartesian* grid, RealScalar c1, RealScalar cnaik, RealScalar c3, RealScalar c5, RealScalar c7, RealScalar clp) 
         : _grid(grid), 
-          linkTreatment(c1,cnaik,c3,c5,c7,clp) {
+          _linkTreatment(c1,cnaik,c3,c5,c7,clp) {
         initialize();
     }
 
     // Allow to pass a pointer to a C-style array for MILC convenience
     Smear_HISQ(GridCartesian* grid, double* coeff) 
         : _grid(grid), 
-          linkTreatment(coeff[0],coeff[1],coeff[2],coeff[3],coeff[4],coeff[5]) {
+          _linkTreatment(coeff[0],coeff[1],coeff[2],coeff[3],coeff[4],coeff[5]) {
         initialize();
     }
     Smear_HISQ(GridCartesian* grid, float* coeff) 
         : _grid(grid), 
-          linkTreatment(coeff[0],coeff[1],coeff[2],coeff[3],coeff[4],coeff[5]) {
+          _linkTreatment(coeff[0],coeff[1],coeff[2],coeff[3],coeff[4],coeff[5]) {
         initialize();
     }
 
@@ -136,11 +196,11 @@ public:
     //          IN--u_thin (thin links)
     void smear(GF& u_smr, GF& u_naik, GF& u_thin) const {
 
-        SmearingParameters lt = this->linkTreatment;
+        SmearingParameters<RealScalar> lt = this->_linkTreatment;
         auto grid = this->_grid;
 
         // Create a padded cell of extra padding depth=1 and fill the padding.
-        PaddedCell Ghost(HaloDepth,grid);
+        PaddedCell Ghost(_HaloDepth,grid);
         GF Ughost = Ghost.Exchange(u_thin);
 
         // This is where auxiliary N-link fields and the final smear will be stored. 
@@ -379,7 +439,7 @@ public:
                     RealScalar c1 = (1/2.)*real(trace(Q*Q))()()();
                     RealScalar c2 = (1/3.)*real(trace(Q*Q*Q))()()();
                     RealScalar S  = (1/3.)*c1-(1/18.)*c0*c0;
-                    if (abs(S)<Scut) {
+                    if (abs(S)<_Scut) {
                         g0 = (1/3.)*c0; 
                         g1 = g0; 
                         g2 = g1;
@@ -419,6 +479,7 @@ public:
 
     // Sort out the Gimpl. This handles BCs and part of the precision. 
     INHERIT_GIMPL_TYPES(Gimpl);
+    typedef typename Gimpl::FermionField   FF;
     typedef typename Gimpl::GaugeField     GF;
     typedef typename Gimpl::GaugeLinkField LF;
     typedef typename Gimpl::ComplexField   CF;
@@ -426,16 +487,18 @@ public:
     typedef decltype(real(ComplexScalar())) RealScalar;
     typedef iColourMatrix<ComplexScalar> ComplexColourMatrix;
 
-    RealScalar Scut=-1; // Cutoff for U(3) projection eigenvalues, set at initialization
-    int HaloDepth=1; 
+    RealScalar _Scut=-1; // Cutoff for U(3) projection eigenvalues, set at initialization
+    int _HaloDepth=1; 
 
-    SmearingParameters<RealScalar> linkTreatment;
+    HISQParameters<RealScalar> _linkParams;
+    HISQReunitSVDParameters<RealScalar> _reunitParams;
+    GF _Umu, _Vmu, _Wmu;
 
     void initialize() {
         if (sizeof(RealScalar)==4) {
-            Scut=1e-5; // Maybe should be higher? e.g. 1e-4
+            _Scut=1e-5; // Maybe should be higher? e.g. 1e-4
         } else if (sizeof(RealScalar)==8) { 
-            Scut=1e-8;
+            _Scut=1e-8;
         } else {
             Grid_error("HISQ force only implemented for single and double");
         }
@@ -443,21 +506,14 @@ public:
         assert(Nd == 4 && "HISQ force only defined for Nd==4");
     }
 
-    Force_HISQ(GridCartesian* grid, RealScalar c1, RealScalar cnaik, RealScalar c3, RealScalar c5, RealScalar c7, RealScalar clp) 
+    Force_HISQ(GridCartesian* grid, HISQParameters<RealScalar> linkParams, GF Wmu, GF Vmu, GF Umu, 
+               HISQReunitSVDParameters<RealScalar> reunitParams) 
         : _grid(grid), 
-          linkTreatment(c1,cnaik,c3,c5,c7,clp) {
-        initialize();
-    }
-
-    // Allow to pass a pointer to a C-style array for MILC convenience
-    Force_HISQ(GridCartesian* grid, double* coeff) 
-        : _grid(grid), 
-          linkTreatment(coeff[0],coeff[1],coeff[2],coeff[3],coeff[4],coeff[5]) {
-        initialize();
-    }
-    Force_HISQ(GridCartesian* grid, float* coeff) 
-        : _grid(grid), 
-          linkTreatment(coeff[0],coeff[1],coeff[2],coeff[3],coeff[4],coeff[5]) {
+          _linkParams(linkParams),
+          _Wmu(Wmu),
+          _Vmu(Vmu),
+          _Umu(Umu),
+          _reunitParams(reunitParams) {
         initialize();
     }
 
@@ -496,7 +552,7 @@ public:
                     RealScalar c1 = (1/2.)*real(trace(Q*Q))()()();
                     RealScalar c2 = (1/3.)*real(trace(Q*Q*Q))()()();
                     RealScalar S  = (1/3.)*c1-(1/18.)*c0*c0;
-                    if (abs(S)<Scut) {
+                    if (abs(S)<_Scut) {
                         g0 = (1/3.)*c0; 
                         g1 = g0; 
                         g2 = g1;
@@ -607,19 +663,30 @@ public:
         });
     };
 
+    void force(GF momentum, RealScalar* vecdt, std::vector<FF*> vecx) {
 
-    void ddV_3link(GF& u_deriv, GF& u_mu, GF& u_force) {
+        // access ith monte carlo separation with vecdt[i]
+        // access ith staggered field pointer with vecx[i] 
 
-        SmearingParameters lt = this->linkTreatment;
+        HISQParameters<RealScalar> hp = this->_linkParams;
         auto grid = this->_grid;
 
-        PaddedCell Ghost(HaloDepth,grid);
-        GF Ughost = Ghost.Exchange(u_mu);
-        GF Fghost = Ghost.Exchange(u_force);
+        GF XY(grid);         // outer product field
+        GF u_force(grid);    // accumulates the force
 
-        GF Ughost_deriv(Ughost.Grid());
+        // construct outer product... i really don't think InsertForce4D will work as is because
+        // i need to distinguish correctly odd sites from even sites (makes |X><Y| vs |Y><X|) and
+        // the product sites have to be separated by 1 or 3 depending on normal vs naik
+        for (int mu = 0; mu < Nd; mu++) {
+            Gimpl::InsertForce4D(XY,vecx[0],vecx[0],mu);
+        }
 
-        Ughost_deriv = Zero();
+        PaddedCell Ghost(_HaloDepth,grid);
+        GF Ughost  = Ghost.Exchange(_Umu);
+        GF XYghost = Ghost.Exchange(XY);
+        GF Fghost  = Ghost.Exchange(u_force);
+
+        Fghost = Zero(); 
 
         std::vector<Coordinate> shifts;
         for(int mu=0;mu<Nd;mu++)
@@ -629,7 +696,6 @@ public:
             appendShift<Nd>(shifts,shiftSignal::NO_SHIFT);
             appendShift<Nd>(shifts,mu,Back(nu));
             appendShift<Nd>(shifts,Back(nu));
-            appendShift<Nd>(shifts,Back(mu));
         }
 
         GeneralLocalStencil gStencil(Ughost.Grid(),shifts);
@@ -637,9 +703,9 @@ public:
 
         for(int mu=0;mu<Nd;mu++) {
 
-            autoView(U_v      , Ughost      , AcceleratorRead);
-            autoView(F_v      , Fghost      , AcceleratorRead);
-            autoView(U_deriv_v, Ughost_deriv, AcceleratorWrite);
+            autoView(U_v , Ughost , AcceleratorRead);
+            autoView(XY_v, XYghost, AcceleratorRead);
+            autoView(F_v , Fghost , AcceleratorWrite);
 
             typedef decltype(getLink(U_v[0](0),gStencil.GetEntry(0,0))) U3matrix;
 
@@ -648,7 +714,7 @@ public:
 
             accelerator_for(site,Nsites,Simd::Nsimd(),{ 
                 stencilElement SE0, SE1, SE2, SE3, SE4;
-                U3matrix U0, U1, U2, U3, U4, U5, F0, F1, F2, F3, F4, F5, W;
+                U3matrix U0, U1, U2, U3, U4, U5, XY0, XY1, XY2, XY3, XY4, XY5, W;
                 for(int nu=0;nu<Nd;nu++) {
                     if(nu==mu) continue;
                     int s = stencilIndex(mu,nu);
@@ -666,27 +732,27 @@ public:
                     U4 = getLink(U_v[x_m_nu     ](mu),SE4);
                     U5 = getLink(U_v[x_m_nu     ](nu),SE4);
 
-                    F0 = getLink(F_v[x_p_mu     ](nu),SE0);
-                    F1 = getLink(F_v[x_p_nu     ](mu),SE1);
-                    F2 = getLink(F_v[x          ](nu),SE2);
-                    F3 = getLink(F_v[x_p_mu_m_nu](nu),SE3);
-                    F4 = getLink(F_v[x_m_nu     ](mu),SE4);
-                    F5 = getLink(F_v[x_m_nu     ](nu),SE4);
+                    XY0 = getLink(XY_v[x_p_mu     ](nu),SE0);
+                    XY1 = getLink(XY_v[x_p_nu     ](mu),SE1);
+                    XY2 = getLink(XY_v[x          ](nu),SE2);
+                    XY3 = getLink(XY_v[x_p_mu_m_nu](nu),SE3);
+                    XY4 = getLink(XY_v[x_m_nu     ](mu),SE4);
+                    XY5 = getLink(XY_v[x_m_nu     ](nu),SE4);
 
-                    W  =   adj(F2)*U1*adj(U0) +     U2 *adj(F1)*adj(U0) +     U2 *U1*    F0 
-                         +     F5 *U4*    U3  + adj(U5)*adj(F4)*    U3  + adj(U5)*U4*adj(F3);                    
+                    W  =   adj(XY2)*U1*adj(U0) +     U2 *adj(XY1)*adj(U0) +     U2 *U1*    XY0 
+                         +     XY5 *U4*    U3  + adj(U5)*adj(XY4)*    U3  + adj(U5)*U4*adj(XY3);                    
 
-                    setLink(U_deriv_v[x](mu), U_deriv_v(x)(mu) + lt.c_3*W);
+                    setLink(F_v[x](mu), F_v(x)(mu) + hp.c_3*W);
                 }              
             })
         } // end mu loop
 
-        u_deriv = Ghost.Extract(Ughost_deriv);
+        u_force = Ghost.Extract(Fghost);
     }
 
     void ddV_naik(GF& u_deriv, GF& u_mu, GF& u_force) {
 
-        SmearingParameters lt = this->linkTreatment;
+        SmearingParameters lt = this->_linkTreatment;
         auto grid = this->_grid;
 
         PaddedCell Ghost(3,grid);

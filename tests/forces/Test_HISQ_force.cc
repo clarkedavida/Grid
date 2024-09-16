@@ -38,27 +38,57 @@ directory
 using namespace Grid;
 
 
-//#define USE_DOUBLE true 
-#define USE_DOUBLE false 
+#define USE_DOUBLE true 
+//#define USE_DOUBLE false 
 
 #if USE_DOUBLE 
     #define PREC double
     typedef LatticeGaugeFieldD LGF;
-    typedef PeriodicGimplD GIMPL;
+    typedef StaggeredImplD GIMPL;
     typedef vComplexD COMP;
 #else
     #define PREC float
     typedef LatticeGaugeFieldF LGF;
-    typedef PeriodicGimplF GIMPL;
+    typedef StaggeredImplF GIMPL;
     typedef vComplexF COMP;
 #endif 
 
 
-bool testForce(GridCartesian& GRID, LGF Umu, LGF Uforce, 
-               LGF Ucontrol, PREC c1, PREC cnaik, PREC c3, PREC c5, PREC c7, PREC clp) {
-    Smear_HISQ<GIMPL> hisq_fat(&GRID,c1,cnaik,c3,c5,c7,clp);
+// Intent: IN--Umu: thin links
+bool testForce(GridCartesian& GRID, LGF Umu, LGF Uforce, LGF Ucontrol) {
+
+    int n_naiks = 1;
+    std::array<PREC,GRID_MAX_NAIK> eps_naik = {0,0,0}; 
+
+//    PREC fat7_c1  = 1/8.;                  PREC asqtad_c1  = 1.;
+//    PREC fat7_c3  = 1/16.;                 PREC asqtad_c3  = 1/16.;
+//    PREC fat7_c5  = 1/64.;                 PREC asqtad_c5  = 1/64.;
+//    PREC fat7_c7  = 1/384.;                PREC asqtad_c7  = 1/384.;
+//    PREC cnaik    = -1/24.+eps_naik[0]/8;  PREC asqtad_clp = -1/8.;
+
+    PREC fat7_c1  = 1.;  PREC asqtad_c1  = 0.;
+    PREC fat7_c3  = 0.;  PREC asqtad_c3  = 1/16.;
+    PREC fat7_c5  = 0.;  PREC asqtad_c5  = 0.;
+    PREC fat7_c7  = 0.;  PREC asqtad_c7  = 0.;
+    PREC cnaik    = 0.;  PREC asqtad_clp = 0.;
+
+    LGF Vmu(&GRID), Wmu(&GRID), Nmu(&GRID);
+    Smear_HISQ<GIMPL> fat7(&GRID,fat7_c1,0.,fat7_c3,fat7_c5,fat7_c7,0.);
+
+    fat7.smear(Vmu,Nmu,Umu); // Populate fat7 and Naik links Vmu and Nmu
+    fat7.projectU3(Wmu,Vmu); // Populate U(3) projection Wmu
+
+    HISQParameters<PREC> hisq_param(n_naiks  , eps_naik ,
+                                    fat7_c1  , fat7_c3  , fat7_c5  , fat7_c7  , 0.,
+                                    asqtad_c1, asqtad_c3, asqtad_c5, asqtad_c7, asqtad_clp,
+                                    cnaik    , 0.       , 0.);
+
+    HISQReunitSVDParameters<PREC> hisq_reunit_svd(false, false, 1, 1, 1);
+
+    Force_HISQ<GIMPL> hisq_force(&GRID, hisq_param, Wmu, Vmu, Umu, hisq_reunit_svd);
+
     LGF diff(&GRID);
-    hisq_fat.ddVprojectU3(Uforce, Umu, Umu, 5e-5);
+    hisq_force.ddVprojectU3(Uforce, Umu, Umu, 5e-5);
     bool result;
     diff = Ucontrol-Uforce;
     auto absDiff = norm2(diff)/norm2(Ucontrol);
@@ -104,7 +134,7 @@ int main (int argc, char** argv) {
     bool pass=true;
 
     NerscIO::readConfiguration(Ucontrol, header, "nersc.l8t4b3360.ddVU3.control");
-    pass *= testForce(GRID,Umu,Umu,Ucontrol,0.,0.,0.,0.,0.,0.);
+    pass *= testForce(GRID,Umu,Umu,Ucontrol);
 
     if(pass){
         Grid_pass("All tests passed.");
