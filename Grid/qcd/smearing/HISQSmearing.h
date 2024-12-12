@@ -475,7 +475,8 @@ template<class Gimpl>
 class Force_HISQ : public Gimpl {
 public:
 
-    GridCartesian* const _grid;
+    GridCartesian*         const _grid;
+    GridRedBlackCartesian* _gridRB;
 
     // Sort out the Gimpl. This handles BCs and part of the precision. 
     INHERIT_GIMPL_TYPES(Gimpl);
@@ -502,6 +503,7 @@ public:
         } else {
             Grid_error("HISQ force only implemented for single and double");
         }
+        _gridRB = SpaceTimeGrid::makeFourDimRedBlackGrid(_grid);
         assert(Nc == 3 && "HISQ force currently implemented only for Nc==3");
         assert(Nd == 4 && "HISQ force only defined for Nd==4");
     }
@@ -663,91 +665,141 @@ public:
         });
     };
 
-    void force(GF momentum, RealScalar* vecdt, std::vector<FF*> vecx) {
-
-        // access ith monte carlo separation with vecdt[i]
-        // access ith staggered field pointer with vecx[i] 
+    // We are calculating the force using the rational approximation. The goal is that we can approximate
+    // (Mdag M)^(-nf/4) = alpha_0 + sum_l alpha_l/(M^dag M + beta_l). Hence the index l runs over the
+    // order of the rational approximation. The additional complication is that each M depends on the
+    // fermion mass, and for higher masses, in particular when there are charm quarks, we need to
+    // introduce a different "Naik epsilon" for each M. Hence, we can think of the total application
+    // of this operator as having an index inaik, running over the different Naik epsilons; for each inaik
+    // there is a possibly different order_inaik, then the operator has an index l running up to order_inaik.
+    // All terms with inaik=0 correspond to epsilon_Naik = 0.
+    //
+    // Intent: OUT--momentum
+    //          IN--vecdt: Monte Carlo separation vector times alpha_{inaik,0}. 
+    //              vecx: A vector of fermion fields coming from the MILC code. It is organized so that 
+    //                    |X_l> = (Mdag M + beta_l)^-1 |Phi> is on even sites, |Y_l>=D|X_l> is on odd sites.
+    //                    All the |X_l> for i=0 come first in memory, followed by all the |X_l> with
+    //                    i=1 in memory, and so on.
+    //              n_orders_naik: Indexed by unique naik epsilon.
+    void force(GF& momentum, RealScalar* vecdt, std::vector<FF*> vecx, std::vector<int> n_orders_naik) {
 
         HISQParameters<RealScalar> hp = this->_linkParams;
-        auto grid = this->_grid;
+        auto grid   = this->_grid;
+        auto gridRB = this->_gridRB;
 
-        GF XY(grid);         // outer product field
-        GF u_force(grid);    // accumulates the force
+        GF XY(grid), tmp(grid); // outer product field
+        GF u_force(grid);       // accumulates the force
 
-        // construct outer product... i really don't think InsertForce4D will work as is because
-        // i need to distinguish correctly odd sites from even sites (makes |X><Y| vs |Y><X|) and
-        // the product sites have to be separated by 1 or 3 depending on normal vs naik
-        for (int mu = 0; mu < Nd; mu++) {
-            Gimpl::InsertForce4D(XY,vecx[0],vecx[0],mu);
+        XY = Zero();
+
+        int l = 0;
+//        for (int inaik = 0; inaik < hp.n_naiks; inaik++) {
+        for (int inaik = 0; inaik < 1; inaik++) {
+            
+            int rat_order = n_orders_naik[inaik];
+            FF X(gridRB), Y(gridRB), Xnu(gridRB), Ynu(gridRB);
+
+            for (int i=0; i<rat_order; i++) {
+
+                X = Zero(); Y = Zero();
+                pickCheckerboard(Even,X,vecx[l]);
+                pickCheckerboard(Odd ,Y,vecx[l]);
+
+                for (int nu = 0; nu < Nd; nu++) {
+                    // InsertForce4D is the thing that computes the outer product. Generically,
+                    // it does this site-wise, i.e. A_i[s] B_j[s]. Hence to construct an outer
+                    // product on different sites, we have to shift one of the guys first. Then
+                    // we place into the outer product |X><Y|_nu.
+                    Ynu = Cshift(Y,nu,1);
+                    Gimpl::InsertForce4D(tmp,Ynu,adj(X),nu);
+                }
+                XY += vecdt[l]*tmp; 
+                for (int nu = 0; nu < Nd; nu++) {
+                    Xnu = Cshift(X,nu,1);
+                    Gimpl::InsertForce4D(tmp,Xnu,adj(Y),nu);
+                }
+                XY -= vecdt[l]*tmp; // capture (-1)^y in eq (2.6)
+
+                l++;
+            }
         }
+        momentum=XY;
 
-        PaddedCell Ghost(_HaloDepth,grid);
-        GF Ughost  = Ghost.Exchange(_Umu);
-        GF XYghost = Ghost.Exchange(XY);
-        GF Fghost  = Ghost.Exchange(u_force);
+//        for (int mu = 0; mu < Nd; mu++) {
+//            U[mu] = PeekIndex<LorentzIndex>(u_thin, mu);
+//            V[mu] = PeekIndex<LorentzIndex>(u_smr, mu);
+//          for (int mu = 0; mu < Nd; mu++) {
+//            PokeIndex<LorentzIndex>(u_smr , V[mu]    , mu);
+//            PokeIndex<LorentzIndex>(u_naik, Vnaik[mu], mu);
+//        }      }
 
-        Fghost = Zero(); 
+//        PaddedCell Ghost(_HaloDepth,grid);
+//        GF Ughost  = Ghost.Exchange(_Umu);
+//        GF XYghost = Ghost.Exchange(XY);
+//        GF Fghost  = Ghost.Exchange(u_force);
+//
+//        Fghost = Zero(); 
+//
+//        std::vector<Coordinate> shifts;
+//        for(int mu=0;mu<Nd;mu++)
+//        for(int nu=0;nu<Nd;nu++) {
+//            appendShift<Nd>(shifts,mu);
+//            appendShift<Nd>(shifts,nu);
+//            appendShift<Nd>(shifts,shiftSignal::NO_SHIFT);
+//            appendShift<Nd>(shifts,mu,Back(nu));
+//            appendShift<Nd>(shifts,Back(nu));
+//        }
 
-        std::vector<Coordinate> shifts;
-        for(int mu=0;mu<Nd;mu++)
-        for(int nu=0;nu<Nd;nu++) {
-            appendShift<Nd>(shifts,mu);
-            appendShift<Nd>(shifts,nu);
-            appendShift<Nd>(shifts,shiftSignal::NO_SHIFT);
-            appendShift<Nd>(shifts,mu,Back(nu));
-            appendShift<Nd>(shifts,Back(nu));
-        }
-
-        GeneralLocalStencil gStencil(Ughost.Grid(),shifts);
-        typedef decltype(gStencil.GetEntry(0,0)) stencilElement;
-
-        for(int mu=0;mu<Nd;mu++) {
-
-            autoView(U_v , Ughost , AcceleratorRead);
-            autoView(XY_v, XYghost, AcceleratorRead);
-            autoView(F_v , Fghost , AcceleratorWrite);
-
-            typedef decltype(getLink(U_v[0](0),gStencil.GetEntry(0,0))) U3matrix;
-
-            int Nsites = U_v.size();
-            auto gStencil_v = gStencil.View(AcceleratorRead);
-
-            accelerator_for(site,Nsites,Simd::Nsimd(),{ 
-                stencilElement SE0, SE1, SE2, SE3, SE4;
-                U3matrix U0, U1, U2, U3, U4, U5, XY0, XY1, XY2, XY3, XY4, XY5, W;
-                for(int nu=0;nu<Nd;nu++) {
-                    if(nu==mu) continue;
-                    int s = stencilIndex(mu,nu);
-
-                    SE0 = gStencil_v.GetEntry(s+0,site); int x_p_mu      = SE0->_offset;
-                    SE1 = gStencil_v.GetEntry(s+1,site); int x_p_nu      = SE1->_offset;
-                    SE2 = gStencil_v.GetEntry(s+2,site); int x           = SE2->_offset;
-                    SE3 = gStencil_v.GetEntry(s+3,site); int x_p_mu_m_nu = SE3->_offset;
-                    SE4 = gStencil_v.GetEntry(s+4,site); int x_m_nu      = SE4->_offset;
-
-                    U0 = getLink(U_v[x_p_mu     ](nu),SE0);
-                    U1 = getLink(U_v[x_p_nu     ](mu),SE1);
-                    U2 = getLink(U_v[x          ](nu),SE2);
-                    U3 = getLink(U_v[x_p_mu_m_nu](nu),SE3);
-                    U4 = getLink(U_v[x_m_nu     ](mu),SE4);
-                    U5 = getLink(U_v[x_m_nu     ](nu),SE4);
-
-                    XY0 = getLink(XY_v[x_p_mu     ](nu),SE0);
-                    XY1 = getLink(XY_v[x_p_nu     ](mu),SE1);
-                    XY2 = getLink(XY_v[x          ](nu),SE2);
-                    XY3 = getLink(XY_v[x_p_mu_m_nu](nu),SE3);
-                    XY4 = getLink(XY_v[x_m_nu     ](mu),SE4);
-                    XY5 = getLink(XY_v[x_m_nu     ](nu),SE4);
-
-                    W  =   adj(XY2)*U1*adj(U0) +     U2 *adj(XY1)*adj(U0) +     U2 *U1*    XY0 
-                         +     XY5 *U4*    U3  + adj(U5)*adj(XY4)*    U3  + adj(U5)*U4*adj(XY3);                    
-
-                    setLink(F_v[x](mu), F_v(x)(mu) + hp.c_3*W);
-                }              
-            })
-        } // end mu loop
-
-        u_force = Ghost.Extract(Fghost);
+//        GeneralLocalStencil gStencil(Ughost.Grid(),shifts);
+//        typedef decltype(gStencil.GetEntry(0,0)) stencilElement;
+//
+//        for(int mu=0;mu<Nd;mu++) {
+//
+//            autoView(U_v , Ughost , AcceleratorRead);
+//            autoView(XY_v, XYghost, AcceleratorRead);
+//            autoView(F_v , Fghost , AcceleratorWrite);
+//
+//            typedef decltype(getLink(U_v[0](0),gStencil.GetEntry(0,0))) U3matrix;
+//
+//            int Nsites = U_v.size();
+//            auto gStencil_v = gStencil.View(AcceleratorRead);
+//
+//            accelerator_for(site,Nsites,Simd::Nsimd(),{ 
+//                stencilElement SE0, SE1, SE2, SE3, SE4;
+//                U3matrix U0, U1, U2, U3, U4, U5, XY0, XY1, XY2, XY3, XY4, XY5, W;
+//                for(int nu=0;nu<Nd;nu++) {
+//                    if(nu==mu) continue;
+//                    int s = stencilIndex(mu,nu);
+//
+//                    SE0 = gStencil_v.GetEntry(s+0,site); int x_p_mu      = SE0->_offset;
+//                    SE1 = gStencil_v.GetEntry(s+1,site); int x_p_nu      = SE1->_offset;
+//                    SE2 = gStencil_v.GetEntry(s+2,site); int x           = SE2->_offset;
+//                    SE3 = gStencil_v.GetEntry(s+3,site); int x_p_mu_m_nu = SE3->_offset;
+//                    SE4 = gStencil_v.GetEntry(s+4,site); int x_m_nu      = SE4->_offset;
+//
+//                    U0 = getLink(U_v[x_p_mu     ](nu),SE0);
+//                    U1 = getLink(U_v[x_p_nu     ](mu),SE1);
+//                    U2 = getLink(U_v[x          ](nu),SE2);
+//                    U3 = getLink(U_v[x_p_mu_m_nu](nu),SE3);
+//                    U4 = getLink(U_v[x_m_nu     ](mu),SE4);
+//                    U5 = getLink(U_v[x_m_nu     ](nu),SE4);
+//
+//                    XY0 = getLink(XY_v[x_p_mu     ](nu),SE0);
+//                    XY1 = getLink(XY_v[x_p_nu     ](mu),SE1);
+//                    XY2 = getLink(XY_v[x          ](nu),SE2);
+//                    XY3 = getLink(XY_v[x_p_mu_m_nu](nu),SE3);
+//                    XY4 = getLink(XY_v[x_m_nu     ](mu),SE4);
+//                    XY5 = getLink(XY_v[x_m_nu     ](nu),SE4);
+//
+//                    W  =   adj(XY2)*U1*adj(U0) +     U2 *adj(XY1)*adj(U0) +     U2 *U1*    XY0 
+//                         +     XY5 *U4*    U3  + adj(U5)*adj(XY4)*    U3  + adj(U5)*U4*adj(XY3);                    
+//
+//                    setLink(F_v[x](mu), F_v(x)(mu) + hp.c_3*W);
+//                }              
+//            })
+//        } // end mu loop
+//
+//        u_force = Ghost.Extract(Fghost);
     }
 
     void ddV_naik(GF& u_deriv, GF& u_mu, GF& u_force) {
