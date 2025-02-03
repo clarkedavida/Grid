@@ -66,7 +66,7 @@ template<class floatT>
 struct HISQParameters{
     // Structure from QOP/QDP 
     int n_naiks;
-    std::array<floatT,GRID_MAX_NAIK> eps_naiks;
+    std::array<floatT,GRID_MAX_NAIK> eps_naiks; // TODO: Change to std::vector
     floatT fat7_c1;
     floatT fat7_c3;
     floatT fat7_c5;
@@ -681,7 +681,8 @@ public:
     //                    All the |X_l> for i=0 come first in memory, followed by all the |X_l> with
     //                    i=1 in memory, and so on.
     //              n_orders_naik: Indexed by unique naik epsilon.
-    void force(GF& momentum, RealScalar* vecdt, std::vector<FF*> vecx, std::vector<int> n_orders_naik) {
+//    void force(GF& momentum, std::vector<RealScalar> vecdt, std::vector<FF*> vecx, std::vector<int> n_orders_naik) {
+    void force(GF& momentum, std::vector<RealScalar> vecdt, std::vector<FF> vecx, std::vector<int> n_orders_naik) {
 
         HISQParameters<RealScalar> hp = this->_linkParams;
         auto grid   = this->_grid;
@@ -693,11 +694,10 @@ public:
         XY = Zero();
 
         int l = 0;
-//        for (int inaik = 0; inaik < hp.n_naiks; inaik++) {
-        for (int inaik = 0; inaik < 1; inaik++) {
+        for (int inaik = 0; inaik < hp.n_naiks; inaik++) {
             
             int rat_order = n_orders_naik[inaik];
-            FF X(gridRB), Y(gridRB), Xnu(gridRB), Ynu(gridRB);
+            FF X(gridRB), Y(gridRB), Xnu(gridRB), Ynu(gridRB), FFdag(gridRB);
 
             for (int i=0; i<rat_order; i++) {
 
@@ -711,12 +711,14 @@ public:
                     // product on different sites, we have to shift one of the guys first. Then
                     // we place into the outer product |X><Y|_nu.
                     Ynu = Cshift(Y,nu,1);
-                    Gimpl::InsertForce4D(tmp,Ynu,adj(X),nu);
+                    FFdag = adj(X); 
+                    Gimpl::InsertForce4D(tmp,Ynu,FFdag,nu);
                 }
                 XY += vecdt[l]*tmp; 
                 for (int nu = 0; nu < Nd; nu++) {
                     Xnu = Cshift(X,nu,1);
-                    Gimpl::InsertForce4D(tmp,Xnu,adj(Y),nu);
+                    FFdag = adj(Y); 
+                    Gimpl::InsertForce4D(tmp,Xnu,FFdag,nu);
                 }
                 XY -= vecdt[l]*tmp; // capture (-1)^y in eq (2.6)
 

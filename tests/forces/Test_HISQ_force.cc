@@ -53,24 +53,94 @@ using namespace Grid;
     typedef vComplexF COMP;
 #endif 
 
+typedef typename GIMPL::FermionField FF;
+
+
+
+
+// This is a sort of contrived test situation. The goal is to make sure the fermion force
+// code is stable against future changes and get an idea how the HISQ force interface works.
+bool testForce(GridCartesian& GRID, LGF Umu, LGF Ucontrol,
+               PREC fat7_c1  , PREC fat7_c3  , PREC fat7_c5  , PREC fat7_c7  , PREC cnaik,
+               PREC asqtad_c1, PREC asqtad_c3, PREC asqtad_c5, PREC asqtad_c7, PREC asqtad_clp) {
+
+    LGF Vmu(&GRID), Wmu(&GRID), Nmu(&GRID), Umom(&GRID);
+
+    // The n_orders_naik array is indexed according to the unique Naik epsilon values. By convention, 
+    // index 0 always corresponds to zero Naik epsilon. n_orders_naik[0] is the sum of the RHMC 
+    // molecular dynamics orders of all the pseudofermion fermions with zero Naik epsilon at the 
+    // head of the rational function parameter file. n_orders_naik[1] is the sum of orders for the 
+    // first nonzero Naik epsilon. The sum of all the n_orders_naik elements equals the size of the 
+    // vecx and vecdt arrays. Elements of those arrays are grouped according to n_orders_naik, so 
+    // the first n_orders_naik[0] elements of vecx and epsv correspond to the pseudofermions with 
+    // nonzero Naik epsilon. That group lumps together terms for each of the zero-epsilon 
+    // pseudofermions.
+    int n_naiks = 1; // Just a charm 
+    std::array<PREC,GRID_MAX_NAIK> eps_naik = {0,0,0}; 
+    std::vector<int> n_orders_naik = {1,1};  
+    std::vector<PREC> vecdt = {0.1,0.1};  
+
+    HISQParameters<PREC> hisq_param(n_naiks  , eps_naik ,
+                                    fat7_c1  , fat7_c3  , fat7_c5  , fat7_c7  , 0.,
+                                    asqtad_c1, asqtad_c3, asqtad_c5, asqtad_c7, asqtad_clp,
+                                    cnaik    , 0.       , 0.);
+    HISQReunitSVDParameters<PREC> hisq_reunit_svd(false, false, 1, 1, 1);
+
+    Smear_HISQ<GIMPL> fat7(&GRID,fat7_c1,0.,fat7_c3,fat7_c5,fat7_c7,0.);
+    fat7.smear(Vmu,Nmu,Umu); // Populate fat7 and Naik links Vmu and Nmu
+    fat7.projectU3(Wmu,Vmu); // Populate U(3) projection Wmu
+    Force_HISQ<GIMPL> hisq_force(&GRID, hisq_param, Wmu, Vmu, Umu, hisq_reunit_svd);
+
+    std::vector<int> seeds({1,2,3,4});
+    GridParallelRNG pRNG(&GRID);  pRNG.SeedFixedIntegers(seeds);
+
+    // Construct a vecx. Eventually it would be nice if this generated the correct distribution,
+    // but for now use Gaussian random variables as a placeholder.
+    std::vector<FF> vecx;
+    int l = 0;
+    for (int inaik = 0; inaik < hisq_param.n_naiks; inaik++) {
+        int rat_order = n_orders_naik[inaik];
+        FF PHI(&GRID);
+        PHI = Zero();
+        for (int i=0; i<rat_order; i++) {
+            gaussian(pRNG,PHI);
+            vecx.push_back(PHI); 
+        }
+    }
+
+    // NEXT STEPS: Make sure fat7/asqtad parameters match the interface.md. Open up Carleton's MILC
+    // test code, which you are going to have to understand at some point anyway, and make sure
+    // your parameters agree with that. Run the test and write as control. Copy control over to
+    // local Grid folder where it is protected. Rewrite test as genuine check. Push it.
+
+    hisq_force.force(Umom,vecdt,vecx,n_orders_naik);
+    LGF diff(&GRID);
+    diff = Ucontrol-Umom;
+    auto absDiff = norm2(diff)/norm2(Ucontrol);
+    if (absDiff < 1e-30) {
+        Grid_pass(" |Umu-Umom|/|Umu| = ",absDiff);
+        return true;
+    } else {
+        Grid_error(" |Umu-Umom|/|Umu| = ",absDiff);
+        return false;
+    }
+//    NerscIO::writeConfiguration(Umom,"nersc.l8t4b3360.Umom.XY.control");
+}
+
 
 // Intent: IN--Umu: thin links
-bool testForce(GridCartesian& GRID, LGF Umu, LGF Uforce, LGF Ucontrol) {
+bool testddUProj(GridCartesian& GRID, LGF Umu, LGF Ucontrol) {
+
+    LGF Uforce(&GRID);
 
     int n_naiks = 1;
     std::array<PREC,GRID_MAX_NAIK> eps_naik = {0,0,0}; 
 
-//    PREC fat7_c1  = 1/8.;                  PREC asqtad_c1  = 1.;
-//    PREC fat7_c3  = 1/16.;                 PREC asqtad_c3  = 1/16.;
-//    PREC fat7_c5  = 1/64.;                 PREC asqtad_c5  = 1/64.;
-//    PREC fat7_c7  = 1/384.;                PREC asqtad_c7  = 1/384.;
-//    PREC cnaik    = -1/24.+eps_naik[0]/8;  PREC asqtad_clp = -1/8.;
-
-    PREC fat7_c1  = 1.;  PREC asqtad_c1  = 0.;
-    PREC fat7_c3  = 0.;  PREC asqtad_c3  = 1/16.;
-    PREC fat7_c5  = 0.;  PREC asqtad_c5  = 0.;
-    PREC fat7_c7  = 0.;  PREC asqtad_c7  = 0.;
-    PREC cnaik    = 0.;  PREC asqtad_clp = 0.;
+    PREC fat7_c1  = 1/8.;                  PREC asqtad_c1  = 1.;
+    PREC fat7_c3  = 1/16.;                 PREC asqtad_c3  = 1/16.;
+    PREC fat7_c5  = 1/64.;                 PREC asqtad_c5  = 1/64.;
+    PREC fat7_c7  = 1/384.;                PREC asqtad_c7  = 1/384.;
+    PREC cnaik    = -1/24.+eps_naik[0]/8;  PREC asqtad_clp = -1/8.;
 
     LGF Vmu(&GRID), Wmu(&GRID), Nmu(&GRID);
     Smear_HISQ<GIMPL> fat7(&GRID,fat7_c1,0.,fat7_c3,fat7_c5,fat7_c7,0.);
@@ -89,18 +159,16 @@ bool testForce(GridCartesian& GRID, LGF Umu, LGF Uforce, LGF Ucontrol) {
 
     LGF diff(&GRID);
     hisq_force.ddVprojectU3(Uforce, Umu, Umu, 5e-5);
-    bool result;
     diff = Ucontrol-Uforce;
     auto absDiff = norm2(diff)/norm2(Ucontrol);
     if (absDiff < 1e-30) {
         Grid_pass(" |Umu-Usmr|/|Umu| = ",absDiff);
-        result = true;
+        return true;
     } else {
         Grid_error(" |Umu-Usmr|/|Umu| = ",absDiff);
-        result = false;
+        return false;
     }
 //    NerscIO::writeConfiguration(Uforce,"nersc.l8t4b3360.ddVU3");
-    return result;
 }
 
 
@@ -133,8 +201,15 @@ int main (int argc, char** argv) {
 
     bool pass=true;
 
+    // Check derivative of projection
     NerscIO::readConfiguration(Ucontrol, header, "nersc.l8t4b3360.ddVU3.control");
-    pass *= testForce(GRID,Umu,Umu,Ucontrol);
+    pass *= testddUProj(GRID,Umu,Ucontrol);
+
+    // Check the inner product (1-link)
+    NerscIO::readConfiguration(Ucontrol, header, "nersc.l8t4b3360.Umom.XY.control");
+    pass *= testForce(GRID, Umu, Ucontrol,
+                      1, 0   , 0, 0, 0,
+                      0, 1/16, 0, 0, 0 );
 
     if(pass){
         Grid_pass("All tests passed.");
