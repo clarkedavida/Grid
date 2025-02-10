@@ -38,8 +38,8 @@ directory
 using namespace Grid;
 
 
-#define USE_DOUBLE true 
-//#define USE_DOUBLE false 
+//#define USE_DOUBLE true 
+#define USE_DOUBLE false 
 
 #if USE_DOUBLE 
     #define PREC double
@@ -61,8 +61,8 @@ typedef typename GIMPL::FermionField FF;
 // This is a sort of contrived test situation. The goal is to make sure the fermion force
 // code is stable against future changes and get an idea how the HISQ force interface works.
 bool testForce(GridCartesian& GRID, LGF Umu, LGF Ucontrol,
-               PREC fat7_c1  , PREC fat7_c3  , PREC fat7_c5  , PREC fat7_c7  , PREC cnaik,
-               PREC asqtad_c1, PREC asqtad_c3, PREC asqtad_c5, PREC asqtad_c7, PREC asqtad_clp) {
+               Real fat7_c1  , Real fat7_c3  , Real fat7_c5  , Real fat7_c7  , Real cnaik,
+               Real asqtad_c1, Real asqtad_c3, Real asqtad_c5, Real asqtad_c7, Real asqtad_clp) {
 
     LGF Vmu(&GRID), Wmu(&GRID), Nmu(&GRID), Umom(&GRID);
 
@@ -76,15 +76,15 @@ bool testForce(GridCartesian& GRID, LGF Umu, LGF Ucontrol,
     // nonzero Naik epsilon. That group lumps together terms for each of the zero-epsilon 
     // pseudofermions.
     int n_naiks = 1; // Just a charm 
-    std::array<PREC,GRID_MAX_NAIK> eps_naik = {0,0,0}; 
+    std::array<Real,GRID_MAX_NAIK> eps_naik = {0,0,0}; 
     std::vector<int> n_orders_naik = {1,1};  
-    std::vector<PREC> vecdt = {0.1,0.1};  
+    std::vector<Real> vecdt = {0.1,0.1};  
 
-    HISQParameters<PREC> hisq_param(n_naiks  , eps_naik ,
+    HISQParameters<Real> hisq_param(n_naiks  , eps_naik ,
                                     fat7_c1  , fat7_c3  , fat7_c5  , fat7_c7  , 0.,
                                     asqtad_c1, asqtad_c3, asqtad_c5, asqtad_c7, asqtad_clp,
                                     cnaik    , 0.       , 0.);
-    HISQReunitSVDParameters<PREC> hisq_reunit_svd(false, false, 1, 1, 1);
+    HISQReunitSVDParameters<Real> hisq_reunit_svd(false, false, 1, 1, 1);
 
     Smear_HISQ<GIMPL> fat7(&GRID,fat7_c1,0.,fat7_c3,fat7_c5,fat7_c7,0.);
     fat7.smear(Vmu,Nmu,Umu); // Populate fat7 and Naik links Vmu and Nmu
@@ -134,13 +134,14 @@ bool testddUProj(GridCartesian& GRID, LGF Umu, LGF Ucontrol) {
     LGF Uforce(&GRID);
 
     int n_naiks = 1;
-    std::array<PREC,GRID_MAX_NAIK> eps_naik = {0,0,0}; 
+    std::array<Real,GRID_MAX_NAIK> eps_naik = {0,0,0}; 
 
-    PREC fat7_c1  = 1/8.;                  PREC asqtad_c1  = 1.;
-    PREC fat7_c3  = 1/16.;                 PREC asqtad_c3  = 1/16.;
-    PREC fat7_c5  = 1/64.;                 PREC asqtad_c5  = 1/64.;
-    PREC fat7_c7  = 1/384.;                PREC asqtad_c7  = 1/384.;
-    PREC cnaik    = -1/24.+eps_naik[0]/8;  PREC asqtad_clp = -1/8.;
+    Real fat7_c1  = 1/8.;                  Real asqtad_c1  = 1.;
+    Real fat7_c3  = 1/16.;                 Real asqtad_c3  = 1/16.;
+    Real fat7_c5  = 1/64.;                 Real asqtad_c5  = 1/64.;
+    Real fat7_c7  = 1/384.;                Real asqtad_c7  = 1/384.;
+    Real cnaik    = -1/24.+eps_naik[0]/8;  Real asqtad_clp = -1/8.;
+
 
     LGF Vmu(&GRID), Wmu(&GRID), Nmu(&GRID);
     Smear_HISQ<GIMPL> fat7(&GRID,fat7_c1,0.,fat7_c3,fat7_c5,fat7_c7,0.);
@@ -148,12 +149,12 @@ bool testddUProj(GridCartesian& GRID, LGF Umu, LGF Ucontrol) {
     fat7.smear(Vmu,Nmu,Umu); // Populate fat7 and Naik links Vmu and Nmu
     fat7.projectU3(Wmu,Vmu); // Populate U(3) projection Wmu
 
-    HISQParameters<PREC> hisq_param(n_naiks  , eps_naik ,
+    HISQParameters<Real> hisq_param(n_naiks  , eps_naik ,
                                     fat7_c1  , fat7_c3  , fat7_c5  , fat7_c7  , 0.,
                                     asqtad_c1, asqtad_c3, asqtad_c5, asqtad_c7, asqtad_clp,
                                     cnaik    , 0.       , 0.);
 
-    HISQReunitSVDParameters<PREC> hisq_reunit_svd(false, false, 1, 1, 1);
+    HISQReunitSVDParameters<Real> hisq_reunit_svd(false, false, 1, 1, 1);
 
     Force_HISQ<GIMPL> hisq_force(&GRID, hisq_param, Wmu, Vmu, Umu, hisq_reunit_svd);
 

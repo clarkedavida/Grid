@@ -491,8 +491,8 @@ public:
     RealScalar _Scut=-1; // Cutoff for U(3) projection eigenvalues, set at initialization
     int _HaloDepth=1; 
 
-    HISQParameters<RealScalar> _linkParams;
-    HISQReunitSVDParameters<RealScalar> _reunitParams;
+    HISQParameters<Real> _linkParams;
+    HISQReunitSVDParameters<Real> _reunitParams;
     GF _Umu, _Vmu, _Wmu;
 
     void initialize() {
@@ -508,8 +508,8 @@ public:
         assert(Nd == 4 && "HISQ force only defined for Nd==4");
     }
 
-    Force_HISQ(GridCartesian* grid, HISQParameters<RealScalar> linkParams, GF Wmu, GF Vmu, GF Umu, 
-               HISQReunitSVDParameters<RealScalar> reunitParams) 
+    Force_HISQ(GridCartesian* grid, HISQParameters<Real> linkParams, GF Wmu, GF Vmu, GF Umu, 
+               HISQReunitSVDParameters<Real> reunitParams) 
         : _grid(grid), 
           _linkParams(linkParams),
           _Wmu(Wmu),
@@ -681,10 +681,10 @@ public:
     //                    All the |X_l> for i=0 come first in memory, followed by all the |X_l> with
     //                    i=1 in memory, and so on.
     //              n_orders_naik: Indexed by unique naik epsilon.
-//    void force(GF& momentum, std::vector<RealScalar> vecdt, std::vector<FF*> vecx, std::vector<int> n_orders_naik) {
-    void force(GF& momentum, std::vector<RealScalar> vecdt, std::vector<FF> vecx, std::vector<int> n_orders_naik) {
+    void force(GF& momentum, std::vector<Real> vecdt, std::vector<FF*> vecx, std::vector<int> n_orders_naik) {
+//    void force(GF& momentum, std::vector<Real> vecdt, std::vector<FF> vecx, std::vector<int> n_orders_naik) {
 
-        HISQParameters<RealScalar> hp = this->_linkParams;
+        HISQParameters<Real> hp = this->_linkParams;
         auto grid   = this->_grid;
         auto gridRB = this->_gridRB;
 
