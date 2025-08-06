@@ -170,7 +170,7 @@ bool testddUProj(GridCartesian& GRID, LGF Umu, LGF Ucontrol) {
     Grid_log("");
 
     LGF diff(&GRID);
-    hisq_force.projU3Deriv(Uforce, Umu, Umu, 5e-5);
+    hisq_force.ddVprojectU3(Uforce, Umu, Umu, 5e-5);
     diff = Ucontrol-Uforce;
     auto absDiff = norm2(diff)/norm2(Ucontrol);
     if (absDiff < 1e-30) {

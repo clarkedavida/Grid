@@ -57,8 +57,9 @@ struct SmearingParameters{
 };
 
 
-// There are 6 quarks in nature, and 3 never need a Naik epsilon
-int const GRID_MAX_NAIK = 3;
+// There are 6 quarks in nature, and 3 never need a Naik epsilon.
+// Convention is to set the 0th Naik epsilon to zero.
+int const GRID_MAX_NAIK = 4;
 
 
 /*!  @brief structure holding all input parameters related to the HISQ action */
@@ -67,8 +68,8 @@ struct HISQParameters{
     // Structure from QOP/QDP 
     int n_naiks;
     std::array<floatT,GRID_MAX_NAIK> eps_naiks;
-    floatT fat7_c1  ; floatT fat7_c3  ; floatT fat7_c5  ; floatT fat7_c7  ; floatT fat7_clp;
-    floatT asqtad_c1; floatT asqtad_c3; floatT asqtad_c5; floatT asqtad_c7; floatT asqtad_clp; floatT asqtad_cnaik;
+    floatT fat7_c1  ; floatT fat7_c3   ; floatT fat7_c5  ; floatT fat7_c7  ; floatT fat7_clp  ;
+    floatT asqtad_c1; floatT asqtad_c3 ; floatT asqtad_c5; floatT asqtad_c7; floatT asqtad_clp; floatT asqtad_cnaik;
     floatT diff_c1  ; floatT diff_cnaik;
     HISQParameters(int n_naiks_in, std::array<floatT,GRID_MAX_NAIK> eps_naiks_in, 
                    floatT fat7_one_link  , floatT fat7_three_staple  , floatT fat7_five_staple  , floatT fat7_seven_staple  , floatT fat7_lepage, 
@@ -749,7 +750,8 @@ public:
     //              u_force (slot derivative into this force), 
     //              delta (force cutoff)
     // Follow MILC 10.1103/PhysRevD.82.074501
-    void projU3Deriv(GF& u_deriv, GF& u_mu, GF& u_force, RealScalar const delta=5e-5) {
+//    void projU3Deriv(GF& u_deriv, GF& u_mu, GF& u_force, RealScalar const delta=5e-5) {
+    void ddVprojectU3(GF& u_deriv, GF& u_mu, GF& u_force, RealScalar const delta=5e-5) {
 
         conformable(u_force,u_mu);
         conformable(u_deriv,u_mu);
@@ -880,43 +882,32 @@ public:
     // vecx (contains |X> and |Y>)
     // l (rat approx and Naik index)
     // sep (separation between |X> and |Y>)
-    GF outerProductHISQ(std::vector<FF>& vecx, std::vector<Real> vecdt, std::vector<int> n_orders_naik, int n_naiks, int sep) {
+    GF outerProductHISQ(std::vector<FF>& vecx, std::vector<Real> vecdt, int l, int sep) {
         
         auto grid   = this->_grid;
         auto gridRB = this->_gridRB;
+        int n_naiks = this->_linkParams.n_naiks;
 
         GF XY(grid), XY_l(grid);
         FF X(grid), Y(grid), RB(gridRB);
         LF XYnu(grid), YXnu(grid);
 
-        XY = Zero();
-
-        // These four lines control the loop over rational approximation contributions. As explained in force(), 
-        // l indexes over both Naik epsilon and rational approximation order.
-        int l = 0;
-        for (int inaik = 0; inaik < n_naiks; inaik++) {
-            int rat_order = n_orders_naik[inaik];
-            for (int i=0; i<rat_order; i++) {
-
-                X = Zero(); Y = Zero(); 
-                
-                RB = Zero(); 
-                pickCheckerboard(Even,RB,vecx[l]);
-                setCheckerboard(X,RB);
-                RB = Zero();
-                pickCheckerboard(Odd ,RB,vecx[l]);
-                setCheckerboard(Y,RB);
+        X = Zero(); Y = Zero(); 
         
-                XY_l = Zero(); XYnu = Zero(); YXnu = Zero(); 
-                for (int nu = 0; nu < Nd; nu++) {
-                    YXnu = outerProduct( Cshift(Y,nu,sep) ,X);
-                    XYnu = outerProduct( Cshift(X,nu,sep) ,Y);
-                    PokeIndex<LorentzIndex>(XY_l,(YXnu-XYnu),nu);
-                }
-                XY += vecdt[l]*XY_l; 
-                l++;
-            }
-        }   
+        RB = Zero(); 
+        pickCheckerboard(Even,RB,vecx[l]);
+        setCheckerboard(X,RB);
+        RB = Zero();
+        pickCheckerboard(Odd ,RB,vecx[l]);
+        setCheckerboard(Y,RB);
+
+        for (int nu = 0; nu < Nd; nu++) {
+            YXnu = outerProduct( Cshift(Y,nu,sep) ,X);
+            XYnu = outerProduct( Cshift(X,nu,sep) ,Y);
+            PokeIndex<LorentzIndex>(XY_l,(YXnu-XYnu),nu);
+        }
+        XY = vecdt[l]*XY_l; 
+
         return XY;
     }
 
@@ -1414,34 +1405,58 @@ if constexpr(term==13) {
     }
 
 
-    GF naikLinkDeriv(std::vector<Real> vecdt, std::vector<FF>& vecx, std::vector<int> n_orders_naik, int n_naiks, Real cnaik) {
-        auto grid = this->_grid;
-        GF temp(grid);
+    GF naikLinkDeriv(std::vector<Real> vecdt, std::vector<FF>& vecx, std::vector<int> n_orders_naik) {
+
+        auto grid   = this->_grid;
+        Real cnaik  = this->_linkParams.asqtad_cnaik;
+        int n_naiks = this->_linkParams.n_naiks;
+        HISQParameters<Real> hp = this->_linkParams;
+
+        GF              result(grid);
+        GF              temp(grid);
         std::vector<LF> Wv(Nd, grid);
         std::vector<LF> XYdag(Nd, grid);
         std::vector<LF> ddW(Nd, grid);
-        temp = outerProductHISQ(vecx, vecdt, n_orders_naik, n_naiks, 3);
-        for (int mu = 0; mu < Nd; mu++) {
-            Wv[mu]    = PeekIndex<LorentzIndex>(_Wmu, mu);
-            XYdag[mu] = PeekIndex<LorentzIndex>(temp, mu);
-            ddW[mu]   = Zero();
+
+        result = Zero();
+
+        int l = 0;
+        for (int inaik = 0; inaik < n_naiks; inaik++) {
+
+            temp = Zero();
+
+            int rat_order = n_orders_naik[inaik];
+            for (int i=0; i<rat_order; i++) {
+                temp += outerProductHISQ(vecx, vecdt, l, 3);
+                l++;
+            }
+
+            for (int mu = 0; mu < Nd; mu++) {
+                Wv[mu]    = PeekIndex<LorentzIndex>(_Wmu, mu);
+                XYdag[mu] = PeekIndex<LorentzIndex>(temp, mu);
+                ddW[mu]   = Zero();
+            }
+            for (int mu = 0; mu < Nd; mu++) {
+                ddW[mu] =    Cshift(   Wv[mu],mu, 1)*Cshift(   Wv[mu],mu, 2)*       XYdag[mu]
+                           + Cshift(   Wv[mu],mu, 1)*Cshift(XYdag[mu],mu,-1)*Cshift(   Wv[mu],mu,-1)
+                           + Cshift(XYdag[mu],mu,-2)*Cshift(   Wv[mu],mu,-2)*Cshift(   Wv[mu],mu,-1); 
+            }
+            for (int mu = 0; mu < Nd; mu++) {
+                PokeIndex<LorentzIndex>(temp, ddW[mu], mu);
+            }
+
+            result += (cnaik+hp.eps_naiks[inaik])*temp;
         }
-        for (int mu = 0; mu < Nd; mu++) {
-            ddW[mu] =    Cshift(   Wv[mu],mu, 1)*Cshift(   Wv[mu],mu, 2)*       XYdag[mu]
-                       + Cshift(   Wv[mu],mu, 1)*Cshift(XYdag[mu],mu,-1)*Cshift(   Wv[mu],mu,-1)
-                       + Cshift(XYdag[mu],mu,-2)*Cshift(   Wv[mu],mu,-2)*Cshift(   Wv[mu],mu,-1); 
-        }
-        for (int mu = 0; mu < Nd; mu++) {
-            PokeIndex<LorentzIndex>(temp, ddW[mu], mu);
-        }
-        return cnaik*temp;
+        return result;
     } 
 
     
-    GF lepageLinkDeriv(GF& XY, Real clp) {
+    GF lepageLinkDeriv(GF& XY) {
 
         auto grid = this->_grid;
-        GF temp(grid);
+        Real clp  = this->_linkParams.asqtad_clp;
+
+        GF              temp(grid);
         std::vector<LF> Wv(Nd, grid);
         std::vector<LF> XYdag(Nd, grid);
         std::vector<LF> ddW(Nd, grid);
@@ -1546,16 +1561,37 @@ if constexpr(term==13) {
         auto grid = this->_grid;
 
         GF XY(grid);    // outer product field
-        GF temp(grid);  // used to accumulate N-link force contributions and projU3Deriv 
+        GF temp(grid);  // used to accumulate N-link force contributions, projU3Deriv, and for inaik contribution to XY
 
         u_force = Zero();
 
-        if(hp.asqtad_cnaik!=0) u_force += naikLinkDeriv(vecdt, vecx, n_orders_naik, hp.n_naiks, hp.asqtad_cnaik); 
+        Grid_log("force--n_naiks:",hp.n_naiks);
+        Grid_log("force--eps naiks:");
+        for(int ii=0;ii<hp.n_naiks;ii++){
+            Grid_log("  inaik = ",ii," eps = ",hp.eps_naiks[ii]);
+        }
+        // is the eps naik just a correction to the force? if it is, then you can,
+        // before closing the gauge path, do another loop over the n_orders naik where
+        // you add in the corrections due to the 1-link and naik-link things. you can
+        // think about how to make it faster later. the MILC 2010 scaling paper should
+        // be able to guide you (equation A5)
 
-        XY = outerProductHISQ(vecx, vecdt, n_orders_naik, hp.n_naiks, 1);   
-        u_force += hp.asqtad_c1*XY;
+        if(hp.asqtad_cnaik!=0) u_force += naikLinkDeriv(vecdt, vecx, n_orders_naik); 
 
-        if(hp.asqtad_clp!=0) u_force += lepageLinkDeriv(XY, hp.asqtad_clp); 
+        XY = Zero();
+        int l = 0;
+        for (int inaik = 0; inaik < hp.n_naiks; inaik++) {
+            temp = Zero();
+            int rat_order = n_orders_naik[inaik];
+            for (int i=0; i<rat_order; i++) {
+                temp += outerProductHISQ(vecx, vecdt, l, 1);
+                l++;   
+            }
+            XY += temp;
+            u_force += (hp.asqtad_c1+hp.eps_naiks[inaik])*temp;
+        }
+
+        if(hp.asqtad_clp!=0) u_force += lepageLinkDeriv(XY); 
 
 
         // ---------------------------------- N-LINK DERIVATIVES (ASQTAD)
@@ -1605,7 +1641,8 @@ if constexpr(term==13) {
 
         // ------------------------------------------- U3 PROJ DERIVATIVE 
 
-        projU3Deriv(temp, _Vmu, u_force, 5e-5);
+//        projU3Deriv(temp, _Vmu, u_force, 5e-5);
+        ddVprojectU3(temp, _Vmu, u_force, 5e-5);
         u_force = hp.fat7_c1*temp;
 
         // ------------------------------------ N-LINK DERIVATIVES (FAT7) 
