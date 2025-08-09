@@ -1407,9 +1407,7 @@ if constexpr(term==13) {
 
     GF naikLinkDeriv(std::vector<Real> vecdt, std::vector<FF>& vecx, std::vector<int> n_orders_naik) {
 
-        auto grid   = this->_grid;
-        Real cnaik  = this->_linkParams.asqtad_cnaik;
-        int n_naiks = this->_linkParams.n_naiks;
+        auto grid               = this->_grid;
         HISQParameters<Real> hp = this->_linkParams;
 
         GF              result(grid);
@@ -1421,7 +1419,7 @@ if constexpr(term==13) {
         result = Zero();
 
         int l = 0;
-        for (int inaik = 0; inaik < n_naiks; inaik++) {
+        for (int inaik = 0; inaik < hp.n_naiks; inaik++) {
 
             temp = Zero();
 
@@ -1445,7 +1443,7 @@ if constexpr(term==13) {
                 PokeIndex<LorentzIndex>(temp, ddW[mu], mu);
             }
 
-            result += (cnaik+hp.eps_naiks[inaik])*temp;
+            result += (cnaik+hp.diff_cnaik*hp.eps_naiks[inaik])*temp;
         }
         return result;
     } 
@@ -1565,17 +1563,6 @@ if constexpr(term==13) {
 
         u_force = Zero();
 
-        Grid_log("force--n_naiks:",hp.n_naiks);
-        Grid_log("force--eps naiks:");
-        for(int ii=0;ii<hp.n_naiks;ii++){
-            Grid_log("  inaik = ",ii," eps = ",hp.eps_naiks[ii]);
-        }
-        // is the eps naik just a correction to the force? if it is, then you can,
-        // before closing the gauge path, do another loop over the n_orders naik where
-        // you add in the corrections due to the 1-link and naik-link things. you can
-        // think about how to make it faster later. the MILC 2010 scaling paper should
-        // be able to guide you (equation A5)
-
         if(hp.asqtad_cnaik!=0) u_force += naikLinkDeriv(vecdt, vecx, n_orders_naik); 
 
         XY = Zero();
@@ -1588,7 +1575,7 @@ if constexpr(term==13) {
                 l++;   
             }
             XY += temp;
-            u_force += (hp.asqtad_c1+hp.eps_naiks[inaik])*temp;
+            u_force += (hp.asqtad_c1+hp.diff_c1*hp.eps_naiks[inaik])*temp;
         }
 
         if(hp.asqtad_clp!=0) u_force += lepageLinkDeriv(XY); 
