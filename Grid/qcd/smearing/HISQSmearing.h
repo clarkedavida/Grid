@@ -1443,7 +1443,7 @@ if constexpr(term==13) {
                 PokeIndex<LorentzIndex>(temp, ddW[mu], mu);
             }
 
-            result += (cnaik+hp.diff_cnaik*hp.eps_naiks[inaik])*temp;
+            result += (hp.asqtad_cnaik+hp.diff_cnaik*hp.eps_naiks[inaik])*temp;
         }
         return result;
     } 

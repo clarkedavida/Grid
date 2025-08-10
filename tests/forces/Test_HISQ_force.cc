@@ -62,9 +62,11 @@ typedef typename GIMPL::FermionField FF;
 // code is stable against future changes and get an idea how the HISQ force interface works.
 bool testForce(GridCartesian& GRID, LGF Umu, LGF Ucontrol, std::string testKind,
                Real fat7_c1  , Real fat7_c3  , Real fat7_c5  , Real fat7_c7  , Real cnaik,
-               Real asqtad_c1, Real asqtad_c3, Real asqtad_c5, Real asqtad_c7, Real asqtad_clp) {
+               Real asqtad_c1, Real asqtad_c3, Real asqtad_c5, Real asqtad_c7, Real asqtad_clp,
+               bool naikEpsilon=false) {
 
     LGF Vmu(&GRID), Wmu(&GRID), Nmu(&GRID), Umom(&GRID);
+    Real diffNaik = 0.0; Real diffc1 = 0.0;
 
     // The n_orders_naik array is indexed according to the unique Naik epsilon values. By convention, 
     // index 0 always corresponds to zero Naik epsilon. n_orders_naik[0] is the sum of the RHMC 
@@ -75,15 +77,23 @@ bool testForce(GridCartesian& GRID, LGF Umu, LGF Ucontrol, std::string testKind,
     // the first n_orders_naik[0] elements of vecx and epsv correspond to the pseudofermions with 
     // nonzero Naik epsilon. That group lumps together terms for each of the zero-epsilon 
     // pseudofermions.
-    int n_naiks = 1; // Just a charm 
+    int n_naiks = 1;
     std::array<Real,GRID_MAX_NAIK> eps_naik = {0,0,0}; 
-    std::vector<int> n_orders_naik = {1,1};  
-    std::vector<Real> vecdt = {0.1,0.1};  
+    std::vector<int> n_orders_naik = {1,1,1};  
+    std::vector<Real> vecdt = {0.1,0.1,0.1};  
+    if (naikEpsilon) {
+        Grid_log("Using Naik epsilon in testForce");
+        n_naiks = 3;
+        std::array<Real,GRID_MAX_NAIK> eps_naik = {0,-0.152048264210358,-0.271190134429433}; 
+        std::vector<int> n_orders_naik = {20,6,6};  
+        std::vector<Real> vecdt = {0.1,0.2,0.3};  
+        diffNaik = -1/24.; diffc1 = 1/8.;
+    }
 
     HISQParameters<Real> hisq_param(n_naiks  , eps_naik ,
                                     fat7_c1  , fat7_c3  , fat7_c5  , fat7_c7  , 0.,
                                     asqtad_c1, asqtad_c3, asqtad_c5, asqtad_c7, asqtad_clp,
-                                    cnaik    , 0.       , 0.);
+                                    cnaik    , diffc1   , diffNaik);
     HISQReunitSVDParameters<Real> hisq_reunit_svd(false, false, 1, 1, 1);
 
     Smear_HISQ<GIMPL> fat7(&GRID,fat7_c1,0.,fat7_c3,fat7_c5,fat7_c7,0.);
@@ -131,6 +141,7 @@ bool testForce(GridCartesian& GRID, LGF Umu, LGF Ucontrol, std::string testKind,
 //    NerscIO::writeConfiguration(Umom,"nersc.l8t4b3360.Umom.7link.control");
 //    NerscIO::writeConfiguration(Umom,"nersc.l8t4b3360.Umom.level2.control");
 //    NerscIO::writeConfiguration(Umom,"nersc.l8t4b3360.Umom.level12.control");
+//    NerscIO::writeConfiguration(Umom,"nersc.l8t4b3360.Umom.full.control");
 //    return true;
 }
 
@@ -264,6 +275,12 @@ int main (int argc, char** argv) {
     pass *= testForce(GRID, Umu, Ucontrol, "level 1+2",
                       1/8., -1/16., 1/64., -1/384., -1/24.,
                       1   , -1/16., 1/64., -1/384., -1/8. );
+
+    // Check full calculation including Naik epsilon 
+    NerscIO::readConfiguration(Ucontrol, header, "nersc.l8t4b3360.Umom.full.control");
+    pass *= testForce(GRID, Umu, Ucontrol, "everything including Naik epsilon",
+                      1/8., -1/16., 1/64., -1/384., -1/24.,
+                      1   , -1/16., 1/64., -1/384., -1/8. , true);
 
 
     if(pass){
